@@ -33,3 +33,16 @@ describe("onboarding with real industry packs", () => {
     expect(seen.map((r) => r.tenant_id)).toEqual([ids.auto]);
   }, 60_000);
 });
+
+describe("public onboarding RPC", () => {
+  it("works for signed-in users and is closed to anonymous callers", async () => {
+    const db = await freshDb();
+    const u = "00000000-0000-4000-8000-000000000061";
+    await createUser(db, u);
+    const stages = JSON.stringify(toPipelineStages(getPack("solar-energy")));
+    const id = await asUser(db, u, async (q) => (await q<{ id: string }>("select public.create_tenant('Sigen Solar','sigen-solar','solar-energy',1,$1::jsonb) as id", [stages]))[0]!.id);
+    expect(id).toMatch(/^[0-9a-f-]{36}$/);
+    await expect(asUser(db, null, (q) => q("select public.create_tenant('x','xx','solar-energy',1,$1::jsonb)", [stages]))).rejects.toThrow(/permission denied/);
+    await expect(asUser(db, null, (q) => q("select app.is_member(gen_random_uuid())"))).rejects.toThrow(/permission denied/);
+  }, 60_000);
+});
