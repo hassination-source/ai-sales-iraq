@@ -10,7 +10,7 @@ There was no existing codebase for this platform. Audited:
 | --- | --- |
 | GitHub `VertaInova/AuutoMec-BI` | **Plattigo** — Nordic car-workshop marketplace (v2.79.1). Separate, mature product. Not modified. |
 | Other GitHub repos | Websites (Dr Basma, Bab Al Agha, IFL Concept, Ultimate Watches). Not relevant. |
-| Supabase | Connector authorised only for the "Dr Basma Esthetic" organization; the new AI-sales project is not visible yet. |
+| Supabase | Project `ai-sales-iraq` (ref `oyxrldoxuqrjevllvsvr`, Frankfurt eu-central-1) created 16 Oct 2026; both migrations applied; security advisor clean; live isolation smoke test passed. |
 | ALTAGA (Sigen business system) | Not in any reachable repo. |
 
 **Decision:** new standalone repo on Supabase (Postgres + Auth + RLS) and Vercel (Next.js).
@@ -47,13 +47,13 @@ supabase/migrations Single source of truth for the schema
 | RLS + role rules + onboarding function `app.create_tenant` | Done, tested |
 | Industry-pack engine + Solar pack + Auto-parts pack | Done, tested |
 | Lead import: CSV (BOM, quotes, `,`/`;`/tab), Arabic/English header detection, Arabic normalization, Iraqi phone → E.164, 19 governorates, duplicate detection (name+governorate, phone, website; in-file and vs existing) | Done, tested |
-| Tests | 45 passing (24 core, 21 database incl. tenant isolation) |
+| Tests | 46 passing (24 core, 22 database incl. tenant isolation and onboarding RPC) |
 
 Not yet built: web UI, Excel import, AI research/draft generation, knowledge base, WhatsApp/email, campaigns, billing, platform admin UI.
 
 ## 5. Next milestones
 
-1. **Wire up Supabase + Vercel** — apply migration, auth (email + phone OTP), deploy.
+1. **Vercel + auth** — database is live; next: Supabase Auth (email + phone OTP), deploy web app to Vercel.
 2. **Web app shell** — Arabic RTL / English, onboarding (pick industry pack), leads list with filters by governorate, CSV/Excel import screen with duplicate review, pipeline board with stage-requirement checks, tasks.
 3. **Knowledge base + grounded AI drafts** — upload brochures/price lists, retrieval, Arabic (Iraqi) and English drafts with sources shown, approve/edit/reject UI, cost metering into `usage_events`.
 4. **WhatsApp Business Cloud API** — templates, opt-in/opt-out, webhooks, human takeover.
@@ -61,8 +61,8 @@ Not yet built: web UI, Excel import, AI research/draft generation, knowledge bas
 
 ## 6. Blockers needing your input
 
-1. **GitHub access** — give the Claude GitHub app access to the new repo, then send the exact `owner/name`.
-2. **Supabase access** — reconnect the Supabase connector and allow the organization that holds the AI-sales project.
-3. **Sigen content for the knowledge base** — approved product catalogue, price list (and whether prices may be quoted by AI), company profile, approved case studies.
-4. **WhatsApp Business** — do you have a Meta Business account and a dedicated number for the WhatsApp Cloud API?
-5. **Legal** — consent/direct-marketing rules for cold outreach in Iraq (federal and Kurdistan Region) need confirmation by local counsel; the schema records a consent basis per contact so the rule can be enforced once decided.
+_Resolved:_ GitHub repo `hassination-source/ai-sales-iraq` connected and pushed; Supabase project live. Free-plan limit: Bab Al Agha's Supabase project was paused to make room — upgrade the ai-sales-iraq org to Pro before onboarding paying tenants.
+
+1. **Sigen content for the knowledge base** — approved product catalogue, price list (and whether prices may be quoted by AI), company profile, approved case studies.
+2. **WhatsApp Business** — do you have a Meta Business account and a dedicated number for the WhatsApp Cloud API?
+3. **Legal** — consent/direct-marketing rules for cold outreach in Iraq (federal and Kurdistan Region) need confirmation by local counsel; the schema records a consent basis per contact so the rule can be enforced once decided.
