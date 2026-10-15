@@ -4,23 +4,22 @@ _15 Oct 2026_
 
 ## 1. What already exists
 
-There was no existing codebase for this platform. Audited:
+This is a new, standalone project; there was no existing codebase for it.
 
 | Source | Finding |
 | --- | --- |
-| GitHub `VertaInova/AuutoMec-BI` | **Plattigo** — Nordic car-workshop marketplace (v2.79.1). Separate, mature product. Not modified. |
-| Other GitHub repos | Websites (Dr Basma, Bab Al Agha, IFL Concept, Ultimate Watches). Not relevant. |
+| GitHub | `hassination-source/ai-sales-iraq` — this project's repo. |
 | Supabase | Project `ai-sales-iraq` (ref `oyxrldoxuqrjevllvsvr`, Frankfurt eu-central-1) created 16 Oct 2026; both migrations applied; security advisor clean; live isolation smoke test passed. |
 | ALTAGA (Sigen business system) | Not in any reachable repo. |
 
 **Decision:** new standalone repo on Supabase (Postgres + Auth + RLS) and Vercel (Next.js).
 
-## 2. What is reused from Plattigo (as conventions, not code)
+## 2. Engineering conventions
 
 - pnpm workspaces + Turborepo, TypeScript strict, Vitest
 - Zod at every boundary; shared domain package
 - AI prompts kept as versioned assets, not inline strings
-- "Unknown stays unknown" rule for AI (Plattigo's diagnosis-vs-repair rule)
+- "Unknown stays unknown": the AI never fills gaps with guesses
 
 ## 3. Architecture and critical decisions
 
