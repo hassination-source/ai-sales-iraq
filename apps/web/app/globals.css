@@ -1,0 +1,65 @@
+@import "tailwindcss";
+
+/* Palette: cool limestone paper, ink, Ishtar-Gate lapis as the working colour,
+   ochre reserved for "won", brick for "lost" and errors. */
+@theme {
+  --color-paper: #f3f5f4;
+  --color-surface: #ffffff;
+  --color-ink: #15202b;
+  --color-muted: #5b6875;
+  --color-line: #d7dde1;
+  --color-lapis: #1d4e89;
+  --color-lapis-deep: #143a68;
+  --color-lapis-soft: #e4ecf6;
+  --color-ochre: #a8740f;
+  --color-ochre-soft: #f6ecd6;
+  --color-brick: #a3432a;
+  --color-brick-soft: #f7e3dc;
+  --font-sans: "Readex Pro", system-ui, sans-serif;
+}
+
+html {
+  background: var(--color-paper);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  font-feature-settings: "tnum" 1;
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  min-height: 100dvh;
+  font-size: 15px;
+  line-height: 1.6;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-lapis);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; animation: none !important; }
+}
+
+@utility field {
+  @apply block w-full rounded-md border border-line bg-surface px-3 py-2 text-[15px] text-ink placeholder:text-muted/70 focus:border-lapis focus:outline-none;
+}
+@utility label {
+  @apply mb-1 block text-sm font-medium text-ink;
+}
+@utility btn {
+  @apply inline-flex items-center justify-center gap-2 rounded-md px-4 py-2 text-sm font-medium transition-colors disabled:opacity-50;
+}
+@utility btn-primary {
+  @apply btn bg-lapis text-white hover:bg-lapis-deep;
+}
+@utility btn-quiet {
+  @apply btn border border-line bg-surface text-ink hover:border-lapis hover:text-lapis;
+}
+@utility note-error {
+  @apply rounded-md border-s-4 border-brick bg-brick-soft px-3 py-2 text-sm text-brick;
+}
+@utility note-info {
+  @apply rounded-md border-s-4 border-lapis bg-lapis-soft px-3 py-2 text-sm text-lapis-deep;
+}
