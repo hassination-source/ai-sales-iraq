@@ -47,7 +47,9 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
       ok: st.ai,
       name: ["كتابة الرسائل بالذكاء الاصطناعي", "AI message writing"],
       what: ["يكتب رسالة أولى لكل شركة اعتماداً على قاعدة المعرفة وموقع الشركة فقط.", "Writes a first message to each company using only your knowledge base and the company's own website."],
-      how: ["يحتاج مفتاح ANTHROPIC_API_KEY في إعدادات Vercel.", "Needs ANTHROPIC_API_KEY in the Vercel project settings."],
+      how: st.aiKeyMalformed
+        ? ["القيمة في ANTHROPIC_API_KEY ليست مفتاحاً صحيحاً. الصق المفتاح فقط (يبدأ بـ sk-ant-) بدون أي نص آخر.", "The value in ANTHROPIC_API_KEY isn't a valid key. Paste only the key (starts with sk-ant-), nothing else."]
+        : ["يحتاج مفتاح ANTHROPIC_API_KEY في إعدادات Vercel.", "Needs ANTHROPIC_API_KEY in the Vercel project settings."],
     },
     {
       ok: st.email,

@@ -48,7 +48,7 @@ function fakeFetch(opts: { overpass?: "ok" | "busy"; ai?: unknown } = {}) {
   return { f, calls };
 }
 
-const ai = { apiKey: "test", model: "test-model", priceIn: 3, priceOut: 15 };
+const ai = { apiKey: "sk-ant-test-" + "x".repeat(30), model: "test-model", priceIn: 3, priceOut: 15 };
 const far = () => Date.now() + 10 * 60_000;
 
 describe("mission: discover → research → draft", () => {
@@ -194,6 +194,30 @@ describe("discovery quality", () => {
     const found = db.rows("agent_events").filter((e) => e.type === "discover.found");
     expect(found[0]!.data.duplicates).toBe(1); // the second Yasmin, not "everything over the limit"
     expect(db.rows("company_research").every((r) => r.status === "skipped" || r.status === "ok")).toBe(true);
+  });
+});
+
+describe("key safety", () => {
+  it("refuses a pasted cURL command as a key without calling the API, and never stores the key", async () => {
+    const { db, mission } = setup();
+    db.tables.knowledge_docs = [{ id: "doc-1", tenant_id: T, title: "P", body: "Sigenergy", status: "active", updated_at: "1" }];
+    let apiCalls = 0;
+    const f = (async (u: RequestInfo | URL, init?: RequestInit) => {
+      if (String(u).includes("anthropic")) apiCalls++;
+      return fakeFetch().f(u, init);
+    }) as typeof fetch;
+    const pasted = 'curl https://api.anthropic.com/v1/messages --header "x-api-key: sk-ant-usr-SECRETSECRETSECRETSECRET"';
+    await runMission(mission, { db, fetch: f, ai: { ...ai, apiKey: pasted }, deadline: far() });
+    expect(apiCalls).toBe(0);
+    const stored = JSON.stringify(db.tables);
+    expect(stored).not.toContain("SECRETSECRET");
+    expect(db.rows("agent_events").find((e) => e.type === "draft.ai_config")?.data.error).toMatch(/paste only the key/);
+  });
+  it("redacts keys from any message", async () => {
+    const { redactSecrets, looksLikeAnthropicKey } = await import("../ai");
+    expect(redactSecrets('boom x-api-key: sk-ant-api03-abcDEF123_- end')).not.toMatch(/abcDEF/);
+    expect(looksLikeAnthropicKey("sk-ant-api03-" + "a".repeat(40))).toBe(true);
+    expect(looksLikeAnthropicKey("curl https://x --header sk-ant-api03-aaaaaaaaaaaaaaaaaaaaaaaa")).toBe(false);
   });
 });
 

@@ -10,12 +10,30 @@ export interface AiConfig {
   priceOut: number;
 }
 
+/** A real Anthropic key is one token: sk-ant-… with no spaces. Anything else is a paste mistake. */
+export function looksLikeAnthropicKey(v: string | undefined): v is string {
+  return !!v && /^sk-ant-[A-Za-z0-9_-]{20,}$/.test(v.trim());
+}
+
+/** Never let a key (or anything key-shaped) reach logs, events or the UI. */
+export function redactSecrets(s: string): string {
+  return s.replace(/sk-ant-[A-Za-z0-9_-]+/g, "sk-ant-…").replace(/(x-api-key|authorization)\s*[:=]\s*\S+/gi, "$1: …");
+}
+
 export type AiResult =
   | { ok: true; draft: DraftOutput; sourceIds: string[]; usage: { input: number; output: number; costUsd: number } }
   | { ok: false; error: string; retryable: boolean; config?: boolean; usage?: { input: number; output: number; costUsd: number } };
 
 /** Ask the model for one grounded draft via forced tool use; validate before returning. */
 export async function writeDraft(req: DraftRequest, cfg: AiConfig, f: Fetch = fetch): Promise<AiResult> {
+  const r = await callModel(req, cfg, f);
+  return r.ok ? r : { ...r, error: redactSecrets(r.error) };
+}
+
+async function callModel(req: DraftRequest, cfg: AiConfig, f: Fetch): Promise<AiResult> {
+  if (!looksLikeAnthropicKey(cfg.apiKey)) {
+    return { ok: false, error: "ANTHROPIC_API_KEY is not a valid key: paste only the key itself (starts with sk-ant-)", retryable: false, config: true };
+  }
   const { system, user, sourceIds } = buildDraftPrompt(req);
   let res: Response;
   try {
@@ -23,7 +41,7 @@ export async function writeDraft(req: DraftRequest, cfg: AiConfig, f: Fetch = fe
       method: "POST",
       headers: {
         "content-type": "application/json",
-        "x-api-key": cfg.apiKey,
+        "x-api-key": cfg.apiKey.trim(),
         "anthropic-version": "2023-06-01",
         ...(cfg.workspaceId ? { "anthropic-workspace-id": cfg.workspaceId } : {}),
       },

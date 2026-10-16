@@ -1,8 +1,9 @@
 import { runMission, type Db, type Mission } from "./mission";
-import type { AiConfig } from "./ai";
+import { redactSecrets, type AiConfig } from "./ai";
 
 export { runMission, type Db, type Mission } from "./mission";
 export type { AiConfig } from "./ai";
+export { looksLikeAnthropicKey, redactSecrets } from "./ai";
 
 /**
  * One worker tick: claim due missions and advance each within the time budget.
@@ -19,7 +20,7 @@ export async function tick(db: Db, ai: AiConfig | null, budgetMs = 240_000, f: t
       await runMission(m, { db, fetch: f, ai, deadline });
       results.push({ id: m.id, ok: true });
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
+      const msg = redactSecrets(e instanceof Error ? e.message : String(e));
       const giveUp = m.attempts >= 10;
       await db.from("agent_events").insert({ tenant_id: m.tenant_id, mission_id: m.id, type: giveUp ? "mission.failed" : "mission.retry", level: giveUp ? "error" : "warning", data: { error: msg.slice(0, 200) } });
       await db
