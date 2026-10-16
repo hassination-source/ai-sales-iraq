@@ -42,6 +42,9 @@ export async function startMission(formData: FormData) {
   if (!parsed.success) redirect("/?error=mission_invalid");
 
   const sb = await supabaseServer();
+  // a double click or a resubmitted form would start the same mission twice and pay for it twice
+  const { data: active } = await sb.from("agent_missions").select("params").eq("tenant_id", ctx.tenant.id).in("status", ["queued", "running"]);
+  if ((active ?? []).some((a: { params: unknown }) => sameMission(a.params, parsed.data))) redirect("/?error=duplicate");
   const { error } = await sb.from("agent_missions").insert({ tenant_id: ctx.tenant.id, params: parsed.data });
   if (error) redirect(`/?error=${encodeURIComponent(error.message.includes("at most 3") ? "too_many" : error.message)}`);
   revalidatePath("/");
@@ -53,4 +56,10 @@ export async function cancelMission(missionId: string) {
   const sb = await supabaseServer();
   await sb.from("agent_missions").update({ status: "cancelled" }).eq("id", missionId).eq("tenant_id", ctx.tenant.id);
   revalidatePath("/");
+}
+
+function sameMission(a: unknown, b: { segments: string[]; governorates: string[] }): boolean {
+  const p = a as { segments?: string[]; governorates?: string[] } | null;
+  const key = (x: string[] | undefined) => [...(x ?? [])].sort().join(",");
+  return key(p?.segments) === key(b.segments) && key(p?.governorates) === key(b.governorates);
 }

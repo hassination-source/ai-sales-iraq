@@ -37,6 +37,7 @@ export default async function AgentHome({ searchParams }: { searchParams: Promis
   const defaultGovs = ctx.config.territories.length ? ctx.config.territories : ["IQ-BG"];
   const errors: Record<string, [string, string]> = {
     mission_invalid: ["اختر قطاعاً ومحافظة واحدة على الأقل.", "Choose at least one segment and one governorate."],
+    duplicate: ["هذه المهمة قيد التنفيذ بالفعل.", "This mission is already running."],
     too_many: ["هناك 3 مهام قيد التنفيذ. انتظر انتهاء إحداها أو ألغِها.", "Three missions are already running. Wait for one to finish or cancel it."],
     role: ["فقط المدير أو المسؤول يمكنه تشغيل الوكيل.", "Only a manager or admin can run the agent."],
   };
