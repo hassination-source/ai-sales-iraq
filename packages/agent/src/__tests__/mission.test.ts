@@ -152,6 +152,31 @@ describe("mission: discover → research → draft", () => {
   });
 });
 
+describe("discovery quality", () => {
+  it("shares the limit across searches, dedupes by email, counts real duplicates, skips social sites", async () => {
+    const { db, mission } = setup({ segments: ["hotel", "hospital"], governorates: ["IQ-BA", "IQ-BG"], limit: 8, write_drafts: false });
+    const many = (gov: string, base: number) => ({
+      elements: [
+        ...Array.from({ length: 10 }, (_, i) => ({ type: "node", id: base + i, tags: { name: `Hotel ${gov} ${i}`, tourism: "hotel" } })),
+        { type: "node", id: base + 50, tags: { name: "Yasmin hotel", email: "same@gmail.com", tourism: "hotel" } },
+        { type: "node", id: base + 51, tags: { name: "AlYasmin hotel", email: "same@gmail.com", tourism: "hotel", website: "https://facebook.com/yasmin" } },
+      ],
+    });
+    let n = 0;
+    const f = (async (u: RequestInfo | URL) => {
+      if (OVERPASS_MIRRORS.includes(String(u))) return new Response(JSON.stringify(many(`g${n}`, ++n * 1000)), { status: 200 });
+      throw new Error("research must not fetch social pages: " + String(u));
+    }) as typeof fetch;
+    await runMission(mission, { db, fetch: f, ai: null, deadline: far() });
+    const companies = db.rows("companies");
+    expect(companies).toHaveLength(8); // 2 per search, not 8 from the first one
+    expect(new Set(companies.map((c) => c.source_ref.split("/")[1]!.slice(0, 1))).size).toBe(4);
+    const found = db.rows("agent_events").filter((e) => e.type === "discover.found");
+    expect(found[0]!.data.duplicates).toBe(1); // the second Yasmin, not "everything over the limit"
+    expect(db.rows("company_research").every((r) => r.status === "skipped" || r.status === "ok")).toBe(true);
+  });
+});
+
 describe("http helpers", () => {
   it("backs off exponentially, capped", () => {
     expect([1, 2, 3, 6, 9].map((a) => backoffMs(a) / 60_000)).toEqual([1, 2, 4, 30, 30]);

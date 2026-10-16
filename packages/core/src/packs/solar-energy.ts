@@ -31,7 +31,7 @@ export const solarEnergyPack = definePack({
       key: "hotel",
       label: { ar: "فنادق", en: "Hotels" },
       painPoints: [{ ar: "الحاجة لكهرباء مستمرة للنزلاء", en: "Need for uninterrupted power for guests" }],
-      discovery: { osm: [[{ key: "tourism", value: "hotel|motel|guest_house", regex: true }]], searchTerms: [{ ar: "فندق", en: "hotel" }] },
+      discovery: { osm: [[{ key: "tourism", value: "hotel|motel", regex: true }]], searchTerms: [{ ar: "فندق", en: "hotel" }] },
     },
     {
       key: "hospital",

@@ -70,6 +70,19 @@ export interface DiscoveredCompany {
   tags: Record<string, string>;
 }
 
+/**
+ * Directory entries that look like a private home or a person rather than a business.
+ * The agent must never target private individuals, so these are dropped at the source.
+ */
+const PRIVATE_BUILDINGS = new Set(["house", "residential", "detached", "apartments", "semidetached_house", "terrace", "bungalow", "farm"]);
+// \b does not work next to Arabic letters in JS regex, so word ends are matched with (?=\s|$)
+const PRIVATE_NAME = /^(?:منزل|مضيف|مظيف|(?:بيت|دار)\s+(?:الحاج|الحجي|السيد|المرحوم|الدكتور|المهندس|الاستاذ|الأستاذ)|house of|home of)(?=\s|$)/i;
+export function looksPrivate(name: string, tags: Record<string, string>): boolean {
+  if (PRIVATE_BUILDINGS.has(tags.building ?? "")) return true;
+  if (tags.access === "private" && !tags.shop && !tags.office && !tags.amenity) return true;
+  return PRIVATE_NAME.test(name.trim());
+}
+
 const first = (tags: Record<string, string>, keys: string[]) => {
   for (const k of keys) if (tags[k]?.trim()) return tags[k]!.split(";")[0]!.trim();
   return null;
@@ -86,7 +99,7 @@ export function parseOverpass(json: unknown, gov: string): DiscoveredCompany[] {
     if (!el.success) continue;
     const t = el.data.tags;
     const name = first(t, ["name:ar", "name", "name:en", "name:ku"]);
-    if (!name) continue;
+    if (!name || looksPrivate(name, t)) continue;
     const ref = `osm:${el.data.type}/${el.data.id}`;
     if (seen.has(ref)) continue;
     seen.add(ref);

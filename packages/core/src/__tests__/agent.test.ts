@@ -47,6 +47,25 @@ describe("OSM discovery", () => {
     expect(out[1]).toMatchObject({ email: null, phone: null, website: null, lat: 30.4 });
     expect(parseOverpass({ nope: 1 }, "IQ-BA")).toEqual([]);
   });
+
+  it("drops entries that look like private homes or people, and email-as-website values", () => {
+    const json = {
+      elements: [
+        { type: "node", id: 21, tags: { name: "منزل المهندس قاسم", tourism: "guest_house" } },
+        { type: "node", id: 22, tags: { name: "مظيف سيد علي", tourism: "guest_house" } },
+        { type: "node", id: 23, tags: { name: "Ali Guest Rooms", building: "house" } },
+        { type: "node", id: 24, tags: { name: "دار الشفاء الأهلي", amenity: "hospital" } },
+        { type: "node", id: 25, tags: { name: "AlYasmin hotel", tourism: "hotel", website: "h51038464@gmail.com" } },
+        { type: "node", id: 26, tags: { name: "بيت الطاقة للمولدات", shop: "electrical" } },
+        { type: "node", id: 27, tags: { name: "بيت الحاج محمد", tourism: "hotel" } },
+        { type: "node", id: 28, tags: { name: "دار السيد جعفر", tourism: "hotel" } },
+        { type: "node", id: 29, tags: { name: "منزلنا للأثاث", shop: "furniture" } },
+      ],
+    };
+    const out = parseOverpass(json, "IQ-BG");
+    expect(out.map((c) => c.name)).toEqual(["دار الشفاء الأهلي", "AlYasmin hotel", "بيت الطاقة للمولدات", "منزلنا للأثاث"]);
+    expect(out[1]!.website).toBeNull();
+  });
 });
 
 describe("website research", () => {

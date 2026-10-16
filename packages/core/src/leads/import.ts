@@ -61,6 +61,7 @@ export function normalizeIraqiPhone(input: string | null | undefined): string | 
 
 export function normalizeWebsite(input: string | null | undefined): string | null {
   if (!input?.trim()) return null;
+  if (input.includes("@")) return null; // an email address typed into a website field
   try {
     const u = new URL(/^https?:\/\//i.test(input.trim()) ? input.trim() : `https://${input.trim()}`);
     if (!u.hostname.includes(".")) return null;

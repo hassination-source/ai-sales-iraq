@@ -151,7 +151,9 @@ async function discover(m: Mission, cfg: EffectiveConfig, p: Progress, deps: Dep
     }
 
     const found = parseOverpass(res.json, gov);
-    const remaining = m.params.limit - (p.found ?? 0);
+    // share the limit across every segment × governorate the user asked for
+    const quota = Math.ceil(m.params.limit / Math.max(1, Object.keys(p.pairs!).length));
+    const remaining = Math.min(quota, m.params.limit - (p.found ?? 0));
     const { inserted, duplicates } = await insertCompanies(db, m, cfg, segKey, found, remaining);
     st.status = "done";
     st.found = inserted;
@@ -170,19 +172,29 @@ async function insertCompanies(db: Db, m: Mission, cfg: EffectiveConfig, segKey:
   if (!found.length || remaining <= 0) return { inserted: 0, duplicates: 0 };
   const refs = found.map((c) => c.source_ref);
   const names = [...new Set(found.map((c) => c.name_normalized))];
-  const [{ data: byRef }, { data: byName }] = await Promise.all([
+  const phones = [...new Set(found.map((c) => c.phone).filter((x): x is string => !!x))];
+  const emails = [...new Set(found.map((c) => c.email).filter((x): x is string => !!x))];
+  const [{ data: byRef }, { data: byName }, { data: byPhone }, { data: byEmail }] = await Promise.all([
     db.from("companies").select("source_ref").eq("tenant_id", m.tenant_id).in("source_ref", refs),
-    db.from("companies").select("name_normalized, governorate, phone").eq("tenant_id", m.tenant_id).in("name_normalized", names),
+    db.from("companies").select("name_normalized, governorate").eq("tenant_id", m.tenant_id).in("name_normalized", names),
+    phones.length ? db.from("companies").select("phone").eq("tenant_id", m.tenant_id).in("phone", phones) : { data: [] },
+    emails.length ? db.from("companies").select("email").eq("tenant_id", m.tenant_id).in("email", emails) : { data: [] },
   ]);
   const seenRef = new Set((byRef ?? []).map((r: { source_ref: string }) => r.source_ref));
   const seenName = new Set((byName ?? []).map((r: { name_normalized: string; governorate: string | null }) => `${r.name_normalized}|${r.governorate ?? ""}`));
-  const seenPhone = new Set((byName ?? []).map((r: { phone: string | null }) => r.phone).filter(Boolean));
+  const seenPhone = new Set((byPhone ?? []).map((r: { phone: string }) => r.phone));
+  const seenEmail = new Set((byEmail ?? []).map((r: { email: string }) => r.email));
 
+  // same business listed several times (or already in the leads): same record, name, phone or email
   const fresh = found.filter((c) => {
-    const dup = seenRef.has(c.source_ref) || seenName.has(`${c.name_normalized}|${c.governorate}`) || (c.phone && seenPhone.has(c.phone));
-    seenName.add(`${c.name_normalized}|${c.governorate}`);
+    const nameKey = `${c.name_normalized}|${c.governorate}`;
+    const dup = seenRef.has(c.source_ref) || seenName.has(nameKey) || (c.phone && seenPhone.has(c.phone)) || (c.email && seenEmail.has(c.email));
+    seenName.add(nameKey);
+    if (c.phone) seenPhone.add(c.phone);
+    if (c.email) seenEmail.add(c.email);
     return !dup;
   });
+  const duplicates = found.length - fresh.length;
   // companies with contact details first: they are the ones the agent can act on
   fresh.sort((a, b) => Number(!!b.website || !!b.email) - Number(!!a.website || !!a.email) || Number(!!b.phone) - Number(!!a.phone));
   const take = fresh.slice(0, remaining);
@@ -208,17 +220,17 @@ async function insertCompanies(db: Db, m: Mission, cfg: EffectiveConfig, segKey:
       fit_score: score.normalized,
     };
   });
-  if (!rows.length) return { inserted: 0, duplicates: found.length };
+  if (!rows.length) return { inserted: 0, duplicates };
 
   const { data, error } = await db.from("companies").insert(rows).select("id");
-  if (!error) return { inserted: data.length, duplicates: found.length - data.length };
+  if (!error) return { inserted: data.length, duplicates };
   // a concurrent run inserted some of these: fall back to one by one, skipping duplicates
   let inserted = 0;
   for (const r of rows) {
     const { error: e } = await db.from("companies").insert(r);
     if (!e) inserted++;
   }
-  return { inserted, duplicates: found.length - inserted };
+  return { inserted, duplicates: duplicates + (rows.length - inserted) };
 }
 
 /* ------------------------------------------------------------------ research */
@@ -247,6 +259,10 @@ async function research(m: Mission, _cfg: EffectiveConfig, p: Progress, deps: De
 
     await Promise.all(
       todo.map(async (c: { id: string; name: string; website: string; email: string | null; phone: string | null }) => {
+        if (isNotCompanySite(c.website)) {
+          await db.from("company_research").upsert({ tenant_id: m.tenant_id, company_id: c.id, url: c.website, status: "skipped", error: "social or webmail page" }, { onConflict: "tenant_id,company_id" });
+          return;
+        }
         const page = await fetchPage(c.website, deps.fetch);
         if (!page.ok) {
           await db.from("company_research").upsert({ tenant_id: m.tenant_id, company_id: c.id, url: c.website, status: "failed", error: page.error.slice(0, 300) }, { onConflict: "tenant_id,company_id" });
@@ -378,6 +394,16 @@ async function draft(m: Mission, cfg: EffectiveConfig, p: Progress, deps: Deps, 
     }
     p.drafted = (p.drafted ?? 0) + 1;
     await ev("draft.created", { name: next.name, subject: result.draft.subject }, "success", { company_id: next.id, draft_id: row.id });
+  }
+}
+
+/** Pages that aren't the company's own site: reading them tells us nothing about the business. */
+const NOT_COMPANY_HOSTS = /(^|\.)(gmail\.com|yahoo\.com|hotmail\.com|outlook\.com|facebook\.com|fb\.com|instagram\.com|tiktok\.com|twitter\.com|x\.com|t\.me|wa\.me|whatsapp\.com|youtube\.com|linkedin\.com|google\.com|goo\.gl|maps\.app\.goo\.gl|linktr\.ee)$/i;
+export function isNotCompanySite(url: string): boolean {
+  try {
+    return NOT_COMPANY_HOSTS.test(new URL(url).hostname);
+  } catch {
+    return true;
   }
 }
 
