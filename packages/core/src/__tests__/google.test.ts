@@ -46,3 +46,12 @@ describe("Google Places source", () => {
     expect(socialLinksFromHtml(html)).toEqual(["https://www.facebook.com/AlNoorPlastic", "https://instagram.com/alnoor_iq"]);
   });
 });
+
+describe("withSignature", () => {
+  it("appends a trimmed signature after one blank line, and leaves the body alone without one", async () => {
+    const { withSignature } = await import("../index");
+    expect(withSignature("نص الرسالة\n\n", "  م. حسن\nwww.sigenergy.com  ")).toBe("نص الرسالة\n\nم. حسن\nwww.sigenergy.com");
+    expect(withSignature("نص", null)).toBe("نص");
+    expect(withSignature("نص", "   ")).toBe("نص");
+  });
+});

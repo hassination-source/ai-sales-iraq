@@ -30,6 +30,8 @@ export interface DraftRequest {
   pack: IndustryPack;
   tenantName: string;
   senderName: string | null;
+  /** Fixed signature appended after the model's text; when set, the model writes no sign-off. */
+  signature?: string | null;
   language: "ar-IQ" | "ar" | "en";
   channel: "email";
   knowledge: KnowledgeDoc[];
@@ -85,7 +87,11 @@ export function buildDraftPrompt(req: DraftRequest): { system: string; user: str
 
   const system = [
     `You write the first outreach email for ${req.tenantName}, a company selling in Iraq (industry: ${t(pack.name, "en")}).`,
-    req.senderName ? `Sign as ${req.senderName}, ${req.tenantName}.` : `Sign as the ${req.tenantName} team.`,
+    req.signature?.trim()
+      ? "End the body with a short closing phrase only. Do not write a name, company name, phone number, website or links: a fixed signature with those is appended automatically."
+      : req.senderName
+        ? `Sign as ${req.senderName}, ${req.tenantName}.`
+        : `Sign as the ${req.tenantName} team.`,
     `Write in ${LANG[req.language]}. ${pack.ai.toneGuide ? `Tone: ${t(pack.ai.toneGuide, "en")}.` : ""}`,
     "",
     "Hard rules:",
@@ -153,4 +159,10 @@ export function checkDraft(raw: unknown, sourceIds: string[]): DraftCheck {
 /** USD per million tokens. Kept as config so it can be updated without code changes elsewhere. */
 export function estimateCostUsd(inputTokens: number, outputTokens: number, price = { input: 3, output: 15 }) {
   return (inputTokens * price.input + outputTokens * price.output) / 1_000_000;
+}
+
+/** The draft body as the prospect will read it: the model's text plus the tenant's fixed signature. */
+export function withSignature(body: string, signature: string | null | undefined): string {
+  const sig = signature?.trim();
+  return sig ? `${body.trimEnd()}\n\n${sig}` : body;
 }

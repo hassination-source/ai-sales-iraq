@@ -11,6 +11,7 @@ import {
   socialLinksFromHtml,
   socialLinksFromTags,
   t,
+  withSignature,
   type DiscoveredCompany,
   type EffectiveConfig,
   type WebsiteFacts,
@@ -417,7 +418,7 @@ async function draft(m: Mission, cfg: EffectiveConfig, p: Progress, deps: Deps, 
   }
 
   const [{ data: settings }, { data: tenant }] = await Promise.all([
-    db.from("agent_settings").select("daily_draft_limit, draft_language, sender_name").eq("tenant_id", m.tenant_id).maybeSingle(),
+    db.from("agent_settings").select("daily_draft_limit, draft_language, sender_name, signature").eq("tenant_id", m.tenant_id).maybeSingle(),
     db.from("tenants").select("name").eq("id", m.tenant_id).single(),
   ]);
   const limit = settings?.daily_draft_limit ?? 20;
@@ -456,6 +457,7 @@ async function draft(m: Mission, cfg: EffectiveConfig, p: Progress, deps: Deps, 
         pack: cfg,
         tenantName: tenant?.name ?? "",
         senderName: settings?.sender_name ?? null,
+        signature: settings?.signature ?? null,
         language,
         channel: "email",
         knowledge: docs,
@@ -465,7 +467,7 @@ async function draft(m: Mission, cfg: EffectiveConfig, p: Progress, deps: Deps, 
           name: next.name,
           governorate: next.governorate,
           segmentLabel: seg ? t(seg.label, "en") : null,
-          directory: next.source_url ? { source: "OpenStreetMap", url: next.source_url, facts: Object.fromEntries(Object.entries(next.attributes?.osm ?? {}).map(([k, v]) => [k, String(v)])) } : null,
+          directory: next.source_url ? directoryFacts(next.source_url, next.attributes) : null,
           website: r?.status === "ok" ? { url: r.url, title: r.title, description: r.description, text: r.text ?? "", emails: r.emails, phones: r.phones, language: r.language } : null,
         },
       },
@@ -501,7 +503,7 @@ async function draft(m: Mission, cfg: EffectiveConfig, p: Progress, deps: Deps, 
         channel: "email",
         language,
         subject: result.draft.subject,
-        body: result.draft.body,
+        body: withSignature(result.draft.body ?? "", settings?.signature),
         grounding: { sources: result.draft.sources_used, hypotheses: result.draft.hypotheses, model: deps.ai.model, website: r?.status === "ok" ? r.url : null, directory: next.source_url },
         generated_by: deps.ai.model,
       })
@@ -514,6 +516,14 @@ async function draft(m: Mission, cfg: EffectiveConfig, p: Progress, deps: Deps, 
     p.drafted = (p.drafted ?? 0) + 1;
     await ev("draft.created", { name: next.name, subject: result.draft.subject }, "success", { company_id: next.id, draft_id: row.id });
   }
+}
+
+/** What the directory listing says about the company, labelled with the directory it came from. */
+function directoryFacts(url: string, attributes: Record<string, unknown> | null) {
+  const google = attributes?.provider === "google";
+  const raw = (google ? attributes?.google : attributes?.osm) as Record<string, unknown> | undefined;
+  const facts = Object.fromEntries(Object.entries(raw ?? {}).filter(([k]) => k !== "expires_at").map(([k, v]) => [k, String(v)]));
+  return { source: google ? "Google Maps" : "OpenStreetMap", url, facts };
 }
 
 /** Pages that aren't the company's own site: reading them tells us nothing about the business. */

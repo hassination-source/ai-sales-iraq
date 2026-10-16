@@ -339,3 +339,21 @@ describe("Google Places source", () => {
     expect(shatt.attributes).toMatchObject({ provider: "osm", social: ["https://www.instagram.com/shatt.hotel"] });
   });
 });
+
+describe("fixed signature", () => {
+  it("is appended verbatim to the draft and the model is told not to sign", async () => {
+    const { db, mission } = setup();
+    db.tables.knowledge_docs = [{ id: "doc-1", tenant_id: T, title: "Products", body: "Sigenergy SigenStor", status: "active", updated_at: "1" }];
+    db.tables.agent_settings = [{ tenant_id: T, daily_draft_limit: 20, draft_language: "ar-IQ", sender_name: "حسن", signature: "م. حسن\nSigen Solar Energy\nwww.sigenergy.com" }];
+    const { f } = fakeFetch();
+    let system = "";
+    const g = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === "https://api.anthropic.com/v1/messages") system = JSON.parse(String(init?.body)).system;
+      return f(input, init);
+    }) as typeof fetch;
+    await runMission(mission, { db, fetch: g, ai, deadline: far() });
+    expect(system).toContain("fixed signature");
+    expect(system).not.toContain("Sign as");
+    expect(db.rows("message_drafts")[0]!.body).toBe("مرحبا…\n\nم. حسن\nSigen Solar Energy\nwww.sigenergy.com");
+  });
+});

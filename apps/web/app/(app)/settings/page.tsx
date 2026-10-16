@@ -16,11 +16,12 @@ async function saveSettings(formData: FormData) {
       daily_draft_limit: z.coerce.number().int().min(0).max(200),
       draft_language: z.enum(["ar-IQ", "ar", "en"]),
       sender_name: z.string().trim().max(120),
+      signature: z.string().trim().max(600),
     })
-    .safeParse({ paused: formData.get("paused") === "on", daily_draft_limit: formData.get("daily_draft_limit"), draft_language: formData.get("draft_language"), sender_name: formData.get("sender_name") ?? "" });
+    .safeParse({ paused: formData.get("paused") === "on", daily_draft_limit: formData.get("daily_draft_limit"), draft_language: formData.get("draft_language"), sender_name: formData.get("sender_name") ?? "", signature: String(formData.get("signature") ?? "").replace(/\r\n/g, "\n") });
   if (!parsed.success) redirect("/settings?error=invalid");
   const sb = await supabaseServer();
-  const { error } = await sb.from("agent_settings").upsert({ tenant_id: ctx.tenant.id, ...parsed.data, sender_name: parsed.data.sender_name || null, updated_by: ctx.userId });
+  const { error } = await sb.from("agent_settings").upsert({ tenant_id: ctx.tenant.id, ...parsed.data, sender_name: parsed.data.sender_name || null, signature: parsed.data.signature || null, updated_by: ctx.userId });
   if (error) redirect(`/settings?error=${encodeURIComponent(error.message)}`);
   revalidatePath("/", "layout");
   redirect("/settings?saved=1");
@@ -96,6 +97,22 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
                 <label className="label" htmlFor="sender_name">{ar ? "اسم المرسل" : "Sender name"}</label>
                 <input className="field" id="sender_name" name="sender_name" defaultValue={s?.sender_name ?? ""} placeholder={ar ? "مثال: حسن" : "e.g. Hassan"} />
               </div>
+            </div>
+            <div>
+              <label className="label" htmlFor="signature">{ar ? "التوقيع الثابت" : "Fixed signature"}</label>
+              <textarea
+                className="field min-h-28 font-mono text-sm"
+                id="signature"
+                name="signature"
+                maxLength={600}
+                defaultValue={s?.signature ?? ""}
+                placeholder={"م. حسن\nSigen Solar Energy – Sigenergy Iraq\nwww.sigensol.com | www.sigenergy.com\n+964 …"}
+              />
+              <p className="mt-1 text-xs text-muted">
+                {ar
+                  ? "يُضاف كما هو إلى نهاية كل رسالة (الاسم، الهاتف، المواقع). الذكاء الاصطناعي لا يكتب توقيعاً عندما يكون هذا الحقل معبّأً."
+                  : "Added exactly as written to the end of every message (name, phone, websites). The AI writes no sign-off of its own when this is filled in."}
+              </p>
             </div>
             {canEdit && <button className="btn-primary">{ar ? "حفظ" : "Save"}</button>}
           </fieldset>
