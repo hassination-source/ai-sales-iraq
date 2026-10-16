@@ -367,6 +367,10 @@ async function draft(m: Mission, cfg: EffectiveConfig, p: Progress, deps: Deps, 
     }
     if (!result.ok) {
       if (result.retryable) return "timeup"; // try again next tick
+      if (result.config) {
+        await once("ai_config", "draft.ai_config", { error: result.error.slice(0, 300) });
+        return "done";
+      }
       await ev("draft.invalid", { name: next.name, reason: result.error.slice(0, 200) }, "warning", { company_id: next.id });
       continue;
     }

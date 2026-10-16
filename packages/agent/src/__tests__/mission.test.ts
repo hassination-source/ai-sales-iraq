@@ -131,6 +131,25 @@ describe("mission: discover → research → draft", () => {
     expect(db.rows("agent_missions")[0]!.status).toBe("done");
   });
 
+  it("stops drafting with one clear message when the AI key needs attention", async () => {
+    const { db, mission } = setup();
+    db.tables.knowledge_docs = [{ id: "doc-1", tenant_id: T, title: "P", body: "Sigenergy", status: "active", updated_at: "1" }];
+    let calls = 0;
+    const f = (async (u: RequestInfo | URL, init?: RequestInit) => {
+      if (String(u) === "https://api.anthropic.com/v1/messages") {
+        calls++;
+        expect((init?.headers as Record<string, string>)["anthropic-workspace-id"]).toBe("wrkspc_1");
+        return new Response(JSON.stringify({ error: { message: "This API key is not scoped to a workspace" } }), { status: 400 });
+      }
+      return fakeFetch().f(u, init);
+    }) as typeof fetch;
+    await runMission(mission, { db, fetch: f, ai: { ...ai, workspaceId: "wrkspc_1" }, deadline: far() });
+    expect(calls).toBe(1); // didn't burn through every company
+    const types = db.rows("agent_events").map((e) => e.type);
+    expect(types.filter((t) => t === "draft.ai_config")).toHaveLength(1);
+    expect(types).not.toContain("draft.invalid");
+  });
+
   it("respects the daily draft limit", async () => {
     const { db, mission } = setup();
     db.tables.knowledge_docs = [{ id: "doc-1", tenant_id: T, title: "P", body: "Sigenergy", status: "active", updated_at: "1" }];

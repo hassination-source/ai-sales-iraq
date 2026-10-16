@@ -3,6 +3,8 @@ import type { Fetch } from "./http";
 
 export interface AiConfig {
   apiKey: string;
+  /** required by Anthropic for keys that aren't scoped to a workspace */
+  workspaceId?: string;
   model: string;
   priceIn: number;
   priceOut: number;
@@ -10,7 +12,7 @@ export interface AiConfig {
 
 export type AiResult =
   | { ok: true; draft: DraftOutput; sourceIds: string[]; usage: { input: number; output: number; costUsd: number } }
-  | { ok: false; error: string; retryable: boolean; usage?: { input: number; output: number; costUsd: number } };
+  | { ok: false; error: string; retryable: boolean; config?: boolean; usage?: { input: number; output: number; costUsd: number } };
 
 /** Ask the model for one grounded draft via forced tool use; validate before returning. */
 export async function writeDraft(req: DraftRequest, cfg: AiConfig, f: Fetch = fetch): Promise<AiResult> {
@@ -19,7 +21,12 @@ export async function writeDraft(req: DraftRequest, cfg: AiConfig, f: Fetch = fe
   try {
     res = await f("https://api.anthropic.com/v1/messages", {
       method: "POST",
-      headers: { "content-type": "application/json", "x-api-key": cfg.apiKey, "anthropic-version": "2023-06-01" },
+      headers: {
+        "content-type": "application/json",
+        "x-api-key": cfg.apiKey,
+        "anthropic-version": "2023-06-01",
+        ...(cfg.workspaceId ? { "anthropic-workspace-id": cfg.workspaceId } : {}),
+      },
       body: JSON.stringify({
         model: cfg.model,
         max_tokens: 1500,
@@ -39,7 +46,10 @@ export async function writeDraft(req: DraftRequest, cfg: AiConfig, f: Fetch = fe
     error?: { message?: string };
   };
   if (!res.ok || !body) {
-    return { ok: false, error: body?.error?.message ?? `HTTP ${res.status}`, retryable: res.status === 429 || res.status >= 500 };
+    const error = body?.error?.message ?? `HTTP ${res.status}`;
+    // key, permission, workspace or model problems: a setup issue, not a bad prospect
+    const config = res.status === 401 || res.status === 403 || res.status === 404 || (res.status === 400 && /workspace|api key|model/i.test(error));
+    return { ok: false, error, retryable: res.status === 429 || res.status >= 500, config };
   }
   const input = body.usage?.input_tokens ?? 0;
   const output = body.usage?.output_tokens ?? 0;
