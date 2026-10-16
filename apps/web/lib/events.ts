@@ -75,6 +75,12 @@ export function describeEvent(e: AgentEvent, lang: Lang, segmentLabel: (key: str
       return ar ? `رفضت مسودة لـ${d.name} لأنها لم تلتزم بالمصادر المعتمدة` : `Discarded a draft for ${d.name}: it didn't stick to approved sources`;
     case "draft.daily_limit":
       return ar ? `وصلت للحد اليومي (${n(d.limit, lang)} رسالة). سأكمل غداً` : `Reached today's limit (${d.limit} messages). I'll continue tomorrow`;
+    case "email.sent":
+      return ar ? `أرسلت الرسالة إلى ${d.name} (${d.to})` : `Sent the message to ${d.name} (${d.to})`;
+    case "email.failed":
+      return ar ? `تعذّر إرسال الرسالة إلى ${d.name}: ${d.error}` : `Couldn't send the message to ${d.name}: ${d.error}`;
+    case "email.unsubscribed":
+      return ar ? `${d.email} طلب عدم مراسلته. لن أراسله مجدداً` : `${d.email} asked not to be contacted. I won't email them again`;
     case "mission.done":
       return ar
         ? `انتهت المهمة: ${n(d.found, lang)} شركة، ${n(d.researched, lang)} موقع، ${n(d.drafted, lang)} رسالة`

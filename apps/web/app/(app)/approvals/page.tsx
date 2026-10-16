@@ -3,7 +3,7 @@ import { getContext } from "@/lib/tenant";
 import { supabaseServer } from "@/lib/supabase/server";
 import { integrationStatus } from "@/lib/supabase/service";
 import { getLang, fmtDate } from "@/lib/i18n";
-import { reviewDraft, saveDraft } from "./actions";
+import { reviewDraft, saveDraft, sendDraft } from "./actions";
 
 type Grounding = { sources?: string[]; hypotheses?: string[]; website?: string | null; directory?: string | null };
 
@@ -16,7 +16,7 @@ export default async function ApprovalsPage({ searchParams }: { searchParams: Pr
   const [{ data: drafts }, { data: docs }, { data: recent }] = await Promise.all([
     sb.from("message_drafts").select("id, subject, body, language, channel, grounding, generated_by, edited, created_at, company:companies(id, name, email, governorate)").eq("tenant_id", ctx.tenant.id).eq("status", "pending_review").order("created_at").limit(30),
     sb.from("knowledge_docs").select("id, title").eq("tenant_id", ctx.tenant.id),
-    sb.from("message_drafts").select("id, status, subject, reviewed_at, company:companies(name)").eq("tenant_id", ctx.tenant.id).in("status", ["approved", "rejected", "sent"]).order("reviewed_at", { ascending: false }).limit(8),
+    sb.from("message_drafts").select("id, status, subject, reviewed_at, to_email, sent_at, send_error, company:companies(name, email)").eq("tenant_id", ctx.tenant.id).in("status", ["approved", "rejected", "sent", "failed"]).order("reviewed_at", { ascending: false }).limit(15),
   ]);
   const docTitle = new Map((docs ?? []).map((d) => [`kb:${d.id}`, d.title]));
   const canReview = ["owner", "admin", "manager"].includes(ctx.role);
@@ -28,7 +28,12 @@ export default async function ApprovalsPage({ searchParams }: { searchParams: Pr
     saved: ["تم حفظ التعديلات.", "Changes saved."],
   };
   const errors: Record<string, [string, string]> = { invalid: ["العنوان والنص مطلوبان.", "Subject and text are required."], role: ["فقط المدير أو المسؤول يمكنه الموافقة.", "Only a manager or admin can approve."] };
-  const note = ["approved", "rejected", "saved"].find((k) => sp[k]);
+  const skipNotes: Record<string, [string, string]> = {
+    no_email: ["لا يوجد بريد إلكتروني لهذه الشركة، لذلك لم تُرسل. تواصل معهم هاتفياً أو عبر واتساب.", "This company has no email address, so nothing was sent. Reach them by phone or WhatsApp."],
+    suppressed: ["هذا العنوان طلب عدم مراسلته، لذلك لم تُرسل.", "This address asked not to be contacted, so nothing was sent."],
+  };
+  const note = sp.sent ? "sent" : ["approved", "rejected", "saved"].find((k) => sp[k]);
+  notes.sent = [`أُرسلت إلى ${sp.sent ?? ""}.`, `Sent to ${sp.sent ?? ""}.`];
 
   return (
     <div className="max-w-4xl space-y-6">
@@ -39,7 +44,8 @@ export default async function ApprovalsPage({ searchParams }: { searchParams: Pr
         </p>
       </header>
 
-      {note && <p className="note-info">{notes[note]![ar ? 0 : 1]}</p>}
+      {note && <p className="note-info">{sp.skip && skipNotes[sp.skip] ? skipNotes[sp.skip]![ar ? 0 : 1] : notes[note]![ar ? 0 : 1]}</p>}
+      {sp.send_error && <p className="note-error">{ar ? "تعذّر الإرسال: " : "Couldn't send: "}{sp.send_error}</p>}
       {sp.error && <p className="note-error">{errors[sp.error]?.[ar ? 0 : 1] ?? sp.error}</p>}
 
       {(drafts ?? []).length === 0 ? (
@@ -117,14 +123,31 @@ export default async function ApprovalsPage({ searchParams }: { searchParams: Pr
         <section>
           <h2 className="text-lg font-semibold">{ar ? "قرارات سابقة" : "Recent decisions"}</h2>
           <ul className="mt-2 divide-y divide-line rounded-lg border border-line bg-surface text-sm">
-            {recent!.map((r) => (
-              <li key={r.id} className="flex justify-between gap-3 px-4 py-2.5">
-                <span>{(r.company as unknown as { name: string } | null)?.name}: <span className="text-muted">{r.subject}</span></span>
-                <span className={r.status === "rejected" ? "text-brick" : "text-lapis"}>
-                  {r.status === "approved" ? (ar ? "موافق عليها" : "Approved") : r.status === "sent" ? (ar ? "أُرسلت" : "Sent") : ar ? "مرفوضة" : "Rejected"}
-                </span>
-              </li>
-            ))}
+            {recent!.map((r) => {
+              const co = r.company as unknown as { name: string; email: string | null } | null;
+              return (
+                <li key={r.id} className="flex flex-wrap items-center justify-between gap-3 px-4 py-2.5">
+                  <span>
+                    {co?.name}: <span className="text-muted">{r.subject}</span>
+                    {r.send_error && <span className="block text-xs text-brick">{r.send_error}</span>}
+                  </span>
+                  <span className="flex items-center gap-3">
+                    {r.status === "approved" && emailReady && canReview && co?.email && (
+                      <form action={sendDraft.bind(null, r.id)}>
+                        <button className="btn-quiet py-1 text-xs">{ar ? "إرسال الآن" : "Send now"}</button>
+                      </form>
+                    )}
+                    <span className={r.status === "rejected" || r.status === "failed" ? "text-brick" : "text-lapis"}>
+                      {r.status === "approved"
+                        ? co?.email ? (ar ? "موافق عليها، لم تُرسل" : "Approved, not sent") : ar ? "موافق عليها، بلا بريد" : "Approved, no email"
+                        : r.status === "sent"
+                          ? `${ar ? "أُرسلت إلى" : "Sent to"} ${r.to_email ?? ""}`
+                          : r.status === "failed" ? (ar ? "فشل الإرسال" : "Failed") : ar ? "مرفوضة" : "Rejected"}
+                    </span>
+                  </span>
+                </li>
+              );
+            })}
           </ul>
         </section>
       )}

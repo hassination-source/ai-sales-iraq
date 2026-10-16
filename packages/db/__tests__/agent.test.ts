@@ -104,6 +104,23 @@ describe("agent missions", () => {
     expect(v[0]!.version).toBe(2);
   });
 
+  it("email delivery: only the sending service marks drafts sent; opt-outs are per tenant", async () => {
+    const draft = await asUser(db, OWNER, async (q) => {
+      const [d] = await q<{ id: string }>("insert into message_drafts(tenant_id, channel, language, subject, body) values ($1,'email','ar','s','body text') returning id", [tenant]);
+      await q("update message_drafts set status='approved' where id=$1", [d!.id]);
+      return d!.id;
+    }, { commit: true });
+    await expect(asUser(db, OWNER, (q) => q("update message_drafts set status='sent' where id=$1", [draft]))).rejects.toThrow(/sending service only/);
+    await expect(asUser(db, SALES, (q) => q("update message_drafts set to_email='x@y.iq' where id=$1", [draft]))).rejects.toThrow(/sending service only/);
+    const sent = await asWorker(async () => (await db.query<{ status: string }>("update message_drafts set status='sent', to_email='info@x.iq', sent_at=now(), provider_message_id='re_1' where id=$1 returning status", [draft])).rows);
+    expect(sent[0]!.status).toBe("sent");
+
+    await asUser(db, SALES, (q) => q("insert into email_suppressions(tenant_id, email, reason) values ($1,'info@x.iq','manual')", [tenant]), { commit: true });
+    await expect(asUser(db, OWNER, (q) => q("insert into email_suppressions(tenant_id, email, reason) values ($1,'Upper@X.iq','manual')", [tenant]))).rejects.toThrow(/check/);
+    expect(await asUser(db, OTHER, (q) => q("select * from email_suppressions"))).toHaveLength(0);
+    await expect(asUser(db, OTHER, (q) => q("insert into email_suppressions(tenant_id, email, reason) values ($1,'a@b.iq','manual')", [tenant]))).rejects.toThrow(/row-level security/);
+  });
+
   it("the cron schedule is registered", async () => {
     const j = await db.query<{ schedule: string }>("select schedule from cron.jobs where name='agent-worker-tick'");
     expect(j.rows[0]!.schedule).toBe("* * * * *");

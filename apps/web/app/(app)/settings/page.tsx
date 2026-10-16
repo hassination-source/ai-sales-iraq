@@ -17,11 +17,12 @@ async function saveSettings(formData: FormData) {
       draft_language: z.enum(["ar-IQ", "ar", "en"]),
       sender_name: z.string().trim().max(120),
       signature: z.string().trim().max(600),
+      from_email: z.union([z.literal(""), z.string().trim().toLowerCase().email().max(200)]),
     })
-    .safeParse({ paused: formData.get("paused") === "on", daily_draft_limit: formData.get("daily_draft_limit"), draft_language: formData.get("draft_language"), sender_name: formData.get("sender_name") ?? "", signature: String(formData.get("signature") ?? "").replace(/\r\n/g, "\n") });
+    .safeParse({ paused: formData.get("paused") === "on", daily_draft_limit: formData.get("daily_draft_limit"), draft_language: formData.get("draft_language"), sender_name: formData.get("sender_name") ?? "", signature: String(formData.get("signature") ?? "").replace(/\r\n/g, "\n"), from_email: String(formData.get("from_email") ?? "").trim() });
   if (!parsed.success) redirect("/settings?error=invalid");
   const sb = await supabaseServer();
-  const { error } = await sb.from("agent_settings").upsert({ tenant_id: ctx.tenant.id, ...parsed.data, sender_name: parsed.data.sender_name || null, signature: parsed.data.signature || null, updated_by: ctx.userId });
+  const { error } = await sb.from("agent_settings").upsert({ tenant_id: ctx.tenant.id, ...parsed.data, sender_name: parsed.data.sender_name || null, signature: parsed.data.signature || null, from_email: parsed.data.from_email || null, updated_by: ctx.userId });
   if (error) redirect(`/settings?error=${encodeURIComponent(error.message)}`);
   revalidatePath("/", "layout");
   redirect("/settings?saved=1");
@@ -55,8 +56,8 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
     {
       ok: st.email,
       name: ["إرسال البريد والردود", "Sending email & replies"],
-      what: ["يرسل الرسائل الموافق عليها من نطاق مخصص ويقرأ الردود.", "Sends approved messages from a dedicated domain and reads the replies."],
-      how: ["الخطوة القادمة: يحتاج نطاق إرسال (مثلاً sales.sigensol.com).", "Next step: needs a sending domain (e.g. sales.sigensol.com)."],
+      what: ["يرسل الرسالة فور موافقتك، مع رابط إلغاء اشتراك في كل رسالة. الردود تصل إلى صندوق بريدك.", "Sends each message as soon as you approve it, with an unsubscribe link in every email. Replies arrive in your own mailbox."],
+      how: ["فعّل النطاق في resend.com (سجلات DNS)، ثم أضف RESEND_API_KEY في Vercel وأعد النشر.", "Verify the domain at resend.com (DNS records), then add RESEND_API_KEY in Vercel and redeploy."],
     },
     {
       ok: st.googlePlaces,
@@ -97,6 +98,11 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
                 <label className="label" htmlFor="sender_name">{ar ? "اسم المرسل" : "Sender name"}</label>
                 <input className="field" id="sender_name" name="sender_name" defaultValue={s?.sender_name ?? ""} placeholder={ar ? "مثال: حسن" : "e.g. Hassan"} />
               </div>
+            </div>
+            <div>
+              <label className="label" htmlFor="from_email">{ar ? "عنوان الإرسال" : "Send from"}</label>
+              <input className="field" id="from_email" name="from_email" type="email" dir="ltr" defaultValue={s?.from_email ?? ""} placeholder="sales@sigensol.com" />
+              <p className="mt-1 text-xs text-muted">{ar ? "يجب أن يكون نطاقه مُفعّلاً في Resend." : "Its domain must be verified in Resend."}</p>
             </div>
             <div>
               <label className="label" htmlFor="signature">{ar ? "التوقيع الثابت" : "Fixed signature"}</label>

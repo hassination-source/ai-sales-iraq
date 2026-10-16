@@ -4,7 +4,10 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { getContext } from "@/lib/tenant";
+import { sendApprovedDraft, type SendOutcome } from "@ais/agent";
 import { supabaseServer } from "@/lib/supabase/server";
+import { supabaseService } from "@/lib/supabase/service";
+import { emailConfig } from "@/lib/email";
 
 const back: (q: string) => never = (q) => redirect(`/approvals?${q}`);
 
@@ -45,5 +48,30 @@ export async function reviewDraft(draftId: string, decision: "approved" | "rejec
   await sb.from("activities").insert({ tenant_id: ctx.tenant.id, type: decision === "approved" ? "draft.approved" : "draft.rejected", company_id: draft?.company_id ?? null, actor_id: ctx.userId, payload: { draft_id: draftId } });
   revalidatePath("/approvals");
   revalidatePath("/");
-  back(decision === "approved" ? "approved=1" : "rejected=1");
+  if (decision === "rejected") back("rejected=1");
+  back(sendOutcomeQuery(await trySend(ctx.tenant.id, draftId)));
+}
+
+/** Send an approved draft that wasn't sent yet (approved before email was connected, or a temporary failure). */
+export async function sendDraft(draftId: string) {
+  const ctx = await getContext();
+  if (!["owner", "admin", "manager"].includes(ctx.role)) back("error=role");
+  const outcome = await trySend(ctx.tenant.id, draftId);
+  revalidatePath("/approvals");
+  back(sendOutcomeQuery(outcome));
+}
+
+async function trySend(tenantId: string, draftId: string): Promise<SendOutcome | null> {
+  const cfg = emailConfig();
+  const db = supabaseService();
+  if (!cfg || !db) return null;
+  // the caller's session already proved membership; the draft lookup is scoped to the same tenant
+  return sendApprovedDraft(db, cfg, tenantId, draftId);
+}
+
+function sendOutcomeQuery(o: SendOutcome | null): string {
+  if (!o) return "approved=1";
+  if (o.status === "sent") return `sent=${encodeURIComponent(o.to)}`;
+  if (o.status === "skipped") return `approved=1&skip=${o.reason}`;
+  return `approved=1&send_error=${encodeURIComponent(o.error)}`;
 }

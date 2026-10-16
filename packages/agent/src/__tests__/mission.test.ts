@@ -357,3 +357,14 @@ describe("fixed signature", () => {
     expect(db.rows("message_drafts")[0]!.body).toBe("مرحبا…\n\nم. حسن\nSigen Solar Energy\nwww.sigenergy.com");
   });
 });
+
+describe("opt-outs", () => {
+  it("never drafts for a company whose address unsubscribed", async () => {
+    const { db, mission } = setup();
+    db.tables.knowledge_docs = [{ id: "doc-1", tenant_id: T, title: "Products", body: "Sigenergy SigenStor", status: "active", updated_at: "1" }];
+    db.tables.email_suppressions = [{ tenant_id: T, email: "info@shatt-hotel.iq", reason: "unsubscribed" }];
+    const { f } = fakeFetch();
+    await runMission(mission, { db, fetch: f, ai, deadline: far() });
+    expect(db.rows("message_drafts")).toHaveLength(0);
+  });
+});

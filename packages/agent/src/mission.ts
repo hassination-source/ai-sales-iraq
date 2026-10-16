@@ -434,11 +434,13 @@ async function draft(m: Mission, cfg: EffectiveConfig, p: Progress, deps: Deps, 
       return "limit";
     }
 
-    const [{ data: candidates }, { data: drafted }, { data: attempted }] = await Promise.all([
+    const [{ data: candidates }, { data: drafted }, { data: attempted }, { data: optedOut }] = await Promise.all([
       db.from("companies").select("id, name, governorate, email, source_url, attributes").eq("tenant_id", m.tenant_id).eq("mission_id", m.id).order("fit_score", { ascending: false }).limit(200),
       db.from("message_drafts").select("company_id").eq("tenant_id", m.tenant_id).not("company_id", "is", null),
       db.from("agent_events").select("company_id").eq("tenant_id", m.tenant_id).eq("mission_id", m.id).in("type", ["draft.skipped", "draft.invalid"]),
+      db.from("email_suppressions").select("email").eq("tenant_id", m.tenant_id),
     ]);
+    const suppressed = new Set((optedOut ?? []).map((r: { email: string }) => r.email));
     const skip = new Set([...(drafted ?? []), ...(attempted ?? [])].map((r: { company_id: string }) => r.company_id));
     const candidateIds = (candidates ?? []).map((c: { id: string }) => c.id);
     const { data: researchRows } = candidateIds.length
@@ -446,8 +448,12 @@ async function draft(m: Mission, cfg: EffectiveConfig, p: Progress, deps: Deps, 
       : { data: [] };
     const researchBy = new Map((researchRows ?? []).map((r: { company_id: string }) => [r.company_id, r]));
 
-    // only companies the agent could actually email
-    const next = (candidates ?? []).find((c: { id: string; email: string | null }) => !skip.has(c.id) && (c.email || ((researchBy.get(c.id) as { emails?: string[] } | undefined)?.emails?.length ?? 0) > 0));
+    // only companies the agent could actually email, and never anyone who opted out
+    const next = (candidates ?? []).find((c: { id: string; email: string | null }) => {
+      if (skip.has(c.id)) return false;
+      const emails = [c.email, ...(((researchBy.get(c.id) as { emails?: string[] } | undefined)?.emails) ?? [])].filter((e): e is string => !!e).map((e) => e.toLowerCase());
+      return emails.length > 0 && !emails.some((e) => suppressed.has(e));
+    });
     if (!next) return "done";
 
     const r = researchBy.get(next.id) as (WebsiteFacts & { status: string }) | undefined;
