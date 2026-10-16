@@ -44,6 +44,9 @@ describe("normalization", () => {
   it("normalizes websites", () => {
     expect(normalizeWebsite("www.Example.iq/about")).toBe("https://example.iq");
     expect(normalizeWebsite("not a site")).toBeNull();
+    expect(normalizeWebsite("https://www.facebook.com/alnoor.hotel")).toBeNull();
+    expect(normalizeWebsite("owner@gmail.com")).toBeNull();
+    expect(normalizeWebsite("https://alnoor.iq/contact")).toBe("https://alnoor.iq");
   });
 });
 

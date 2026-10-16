@@ -50,18 +50,34 @@ supabase/migrations Single source of truth for the schema
 
 Not yet built: web UI, Excel import, AI research/draft generation, knowledge base, WhatsApp/email, campaigns, billing, platform admin UI.
 
-## 5. Next milestones
+## 5. Direction change (16 Oct): an autonomous agent at the centre
 
-1. **Vercel + auth** — database is live; next: Supabase Auth (email + phone OTP), deploy web app to Vercel.
-2. **Web app shell** — Arabic RTL / English, onboarding (pick industry pack), leads list with filters by governorate, CSV/Excel import screen with duplicate review, pipeline board with stage-requirement checks, tasks.
-3. **Knowledge base + grounded AI drafts** — upload brochures/price lists, retrieval, Arabic (Iraqi) and English drafts with sources shown, approve/edit/reject UI, cost metering into `usage_events`.
-4. **WhatsApp Business Cloud API** — templates, opt-in/opt-out, webhooks, human takeover.
-5. Campaigns, reporting/ROI, subscriptions, platform admin.
+The product is an AI sales agent in the spirit of Selma, adapted to Iraq. The CRM, leads and pipeline built in Phase 1 are the layer the agent writes into and hands over to.
+
+**Built and running live**
+- Agent missions: the user picks segments + governorates; the agent works on its own (triggered every minute by pg_cron and immediately on start).
+- Discovery from OpenStreetMap (ODbL, storable with attribution), configured per industry-pack segment; every company stored with its source link.
+- Privacy: entries that look like private homes or people are dropped at the source; webmail/social links are not treated as company websites.
+- Website research: public pages only, SSRF-guarded, size/time limited; facts only.
+- AI writer: forced structured output, validated against the sources supplied; hypotheses labelled; never invents (pack rules); daily limit; cost recorded.
+- Approvals inbox (edit / approve / reject), knowledge base, agent settings (pause, limit, language, sender), live activity feed.
+
+**Learned from live runs**
+- Public Overpass servers are often at capacity; the agent retries with backoff and server rotation, but it is slow. Google Places as a second source is recommended for reliability.
+- OSM "guest houses" and "clinics" are mostly homes and individual doctors: removed from the solar searches.
+
+**Next**
+1. AI writing on (needs `ANTHROPIC_API_KEY` in Vercel) and a first knowledge base for Sigen.
+2. Email sending from a dedicated domain (Resend), follow-up sequences, reply classification, opt-out handling.
+3. Meeting booking and handover to a salesperson; WhatsApp only for inbound / opted-in contacts.
+4. Google Places source (needs `GOOGLE_PLACES_API_KEY`; Places content may not be stored long-term, so only place IDs are kept and details re-fetched).
 
 ## 6. Blockers needing your input
 
 _Resolved:_ GitHub repo `hassination-source/ai-sales-iraq` connected and pushed; Supabase project live. Free-plan limit: Bab Al Agha's Supabase project was paused to make room — upgrade the ai-sales-iraq org to Pro before onboarding paying tenants.
 
 1. **Sigen content for the knowledge base** — approved product catalogue, price list (and whether prices may be quoted by AI), company profile, approved case studies.
-2. **WhatsApp Business** — do you have a Meta Business account and a dedicated number for the WhatsApp Cloud API?
-3. **Legal** — consent/direct-marketing rules for cold outreach in Iraq (federal and Kurdistan Region) need confirmation by local counsel; the schema records a consent basis per contact so the rule can be enforced once decided.
+2. **AI key** — `ANTHROPIC_API_KEY` in Vercel → Settings → Environment Variables (Production), then redeploy.
+3. **Sending domain** — e.g. `sales.sigensol.com`, for email outreach (keeps the main domain's reputation safe).
+4. **WhatsApp Business** — do you have a Meta Business account and a dedicated number for the WhatsApp Cloud API?
+5. **Legal** — consent/direct-marketing rules for cold outreach in Iraq (federal and Kurdistan Region) need confirmation by local counsel; the schema records a consent basis per contact so the rule can be enforced once decided.

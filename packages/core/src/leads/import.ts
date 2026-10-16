@@ -59,9 +59,13 @@ export function normalizeIraqiPhone(input: string | null | undefined): string | 
   return null;
 }
 
+/** Hosts that are never a company's own website (social pages, webmail, link shorteners). */
+export const SOCIAL_OR_WEBMAIL = /(^|\.)(gmail\.com|yahoo\.com|hotmail\.com|outlook\.com|facebook\.com|fb\.com|fb\.me|instagram\.com|tiktok\.com|twitter\.com|x\.com|t\.me|wa\.me|whatsapp\.com|youtube\.com|linkedin\.com|google\.com|goo\.gl|linktr\.ee)$/i;
+
 export function normalizeWebsite(input: string | null | undefined): string | null {
   if (!input?.trim()) return null;
   if (input.includes("@")) return null; // an email address typed into a website field
+  if (SOCIAL_OR_WEBMAIL.test(input.replace(/^https?:\/\//i, "").split(/[/?#]/)[0] ?? "")) return null; // not the company's own site
   try {
     const u = new URL(/^https?:\/\//i.test(input.trim()) ? input.trim() : `https://${input.trim()}`);
     if (!u.hostname.includes(".")) return null;

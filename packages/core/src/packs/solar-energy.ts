@@ -37,7 +37,7 @@ export const solarEnergyPack = definePack({
       key: "hospital",
       label: { ar: "مستشفيات ومراكز صحية", en: "Hospitals & clinics" },
       painPoints: [{ ar: "أجهزة حرجة تحتاج طاقة احتياطية", en: "Critical equipment needs backup power" }],
-      discovery: { osm: [[{ key: "amenity", value: "hospital|clinic", regex: true }], [{ key: "healthcare", value: "hospital|clinic|centre", regex: true }]], searchTerms: [{ ar: "مستشفى", en: "hospital" }] },
+      discovery: { osm: [[{ key: "amenity", value: "hospital" }], [{ key: "healthcare", value: "hospital" }]], searchTerms: [{ ar: "مستشفى", en: "hospital" }] },
     },
     {
       key: "commercial_building",

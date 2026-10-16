@@ -5,6 +5,7 @@ import {
   parseOverpass,
   resolveConfig,
   scoreCompany,
+  SOCIAL_OR_WEBMAIL,
   t,
   type EffectiveConfig,
   type WebsiteFacts,
@@ -398,10 +399,9 @@ async function draft(m: Mission, cfg: EffectiveConfig, p: Progress, deps: Deps, 
 }
 
 /** Pages that aren't the company's own site: reading them tells us nothing about the business. */
-const NOT_COMPANY_HOSTS = /(^|\.)(gmail\.com|yahoo\.com|hotmail\.com|outlook\.com|facebook\.com|fb\.com|instagram\.com|tiktok\.com|twitter\.com|x\.com|t\.me|wa\.me|whatsapp\.com|youtube\.com|linkedin\.com|google\.com|goo\.gl|maps\.app\.goo\.gl|linktr\.ee)$/i;
 export function isNotCompanySite(url: string): boolean {
   try {
-    return NOT_COMPANY_HOSTS.test(new URL(url).hostname);
+    return SOCIAL_OR_WEBMAIL.test(new URL(url).hostname);
   } catch {
     return true;
   }
