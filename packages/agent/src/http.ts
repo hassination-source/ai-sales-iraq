@@ -23,11 +23,13 @@ export async function runOverpass(query: string, attempt: number, f: Fetch = fet
   try {
     const res = await f(server, {
       method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded", "User-Agent": USER_AGENT, Accept: "application/json" },
+      // no Accept header: some Overpass servers answer 406 to content negotiation
+      headers: { "Content-Type": "application/x-www-form-urlencoded", "User-Agent": USER_AGENT },
       body: `data=${encodeURIComponent(query)}`,
       signal: AbortSignal.timeout(timeoutMs),
     });
-    if (!res.ok) return { ok: false, retryable: [429, 500, 502, 503, 504].includes(res.status), error: `HTTP ${res.status}`, server };
+    // only a malformed query is permanent; anything else may be one busy or strict server, so rotate and retry
+    if (!res.ok) return { ok: false, retryable: res.status !== 400, error: `HTTP ${res.status}`, server };
     const text = await res.text();
     try {
       const json = JSON.parse(text);

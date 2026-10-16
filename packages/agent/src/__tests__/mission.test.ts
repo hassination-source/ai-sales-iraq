@@ -156,6 +156,14 @@ describe("http helpers", () => {
   it("backs off exponentially, capped", () => {
     expect([1, 2, 3, 6, 9].map((a) => backoffMs(a) / 60_000)).toEqual([1, 2, 4, 30, 30]);
   });
+  it("retries strict-server errors on the next server, but not malformed queries; sends no Accept header", async () => {
+    let headers: Record<string, string> = {};
+    const f406 = (async (_u: RequestInfo | URL, init?: RequestInit) => { headers = init?.headers as Record<string, string>; return new Response("", { status: 406 }); }) as typeof fetch;
+    expect(await runOverpass("q", 0, f406)).toMatchObject({ ok: false, retryable: true });
+    expect(Object.keys(headers).map((h) => h.toLowerCase())).not.toContain("accept");
+    const f400 = (async () => new Response("bad query", { status: 400 })) as typeof fetch;
+    expect(await runOverpass("q", 0, f400)).toMatchObject({ ok: false, retryable: false });
+  });
   it("treats Overpass timeouts inside 200 responses as retryable", async () => {
     const f = (async () => new Response(JSON.stringify({ remark: "runtime error: Query timed out" }), { status: 200 })) as typeof fetch;
     expect(await runOverpass("q", 0, f)).toMatchObject({ ok: false, retryable: true });
