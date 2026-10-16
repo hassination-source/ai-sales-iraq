@@ -36,10 +36,11 @@ export async function writeDraft(req: DraftRequest, cfg: AiConfig, f: Fetch = fe
         // newer models don't accept a forced tool; the prompt requires it and the output is validated either way
         tool_choice: { type: "auto" },
       }),
-      signal: AbortSignal.timeout(60_000),
+      signal: AbortSignal.timeout(120_000),
     });
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : String(e), retryable: true };
+    const msg = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
+    return { ok: false, error: msg, retryable: true };
   }
   const body = (await res.json().catch(() => null)) as null | {
     content?: { type: string; name?: string; input?: unknown }[];
@@ -47,7 +48,7 @@ export async function writeDraft(req: DraftRequest, cfg: AiConfig, f: Fetch = fe
     error?: { message?: string };
   };
   if (!res.ok || !body) {
-    const error = body?.error?.message ?? `HTTP ${res.status}`;
+    const error = `HTTP ${res.status}: ${body?.error?.message ?? "no message"}`;
     // key, permission, workspace or model problems: a setup issue, not a bad prospect
     const config = res.status === 401 || res.status === 403 || res.status === 404 || (res.status === 400 && /workspace|api key|model/i.test(error));
     return { ok: false, error, retryable: res.status === 429 || res.status >= 500, config };

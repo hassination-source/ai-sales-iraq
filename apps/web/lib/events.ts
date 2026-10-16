@@ -59,6 +59,8 @@ export function describeEvent(e: AgentEvent, lang: Lang, segmentLabel: (key: str
       return ar ? "أضف معلومات شركتك ومنتجاتك في قاعدة المعرفة حتى أكتب رسائل دقيقة" : "Add your company and product information to the knowledge base so I can write accurate messages";
     case "draft.ai_config":
       return ar ? `مفتاح الذكاء الاصطناعي يحتاج إلى ضبط: ${d.error}` : `The AI key needs attention: ${d.error}`;
+    case "draft.ai_retry":
+      return ar ? `خدمة الذكاء الاصطناعي لم تستجب. سأحاول مجدداً (${d.error})` : `The AI service didn't respond. Trying again (${d.error})`;
     case "draft.created":
       return ar ? `كتبت رسالة إلى ${d.name}: بانتظار موافقتك` : `Wrote a message to ${d.name}: waiting for your approval`;
     case "draft.skipped":

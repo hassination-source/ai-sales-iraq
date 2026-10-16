@@ -366,7 +366,11 @@ async function draft(m: Mission, cfg: EffectiveConfig, p: Progress, deps: Deps, 
       await db.from("usage_events").insert({ tenant_id: m.tenant_id, kind: "ai.draft", quantity: result.usage.input + result.usage.output, cost_usd: result.usage.costUsd, metadata: { model: deps.ai.model, input_tokens: result.usage.input, output_tokens: result.usage.output, company_id: next.id } });
     }
     if (!result.ok) {
-      if (result.retryable) return "timeup"; // try again next tick
+      if (result.retryable) {
+        // temporary (timeout, overload, rate limit): say so once per kind of error, then try again next tick
+        await once(`ai_retry_${result.error.slice(0, 40)}`, "draft.ai_retry", { error: result.error.slice(0, 300) });
+        return "timeup";
+      }
       if (result.config) {
         await once("ai_config", "draft.ai_config", { error: result.error.slice(0, 300) });
         return "done";
