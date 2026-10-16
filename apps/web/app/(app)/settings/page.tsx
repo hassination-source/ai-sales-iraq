@@ -60,8 +60,8 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
     {
       ok: st.googlePlaces,
       name: ["Google Places (اختياري)", "Google Places (optional)"],
-      what: ["مصدر إضافي موثوق للعثور على الشركات.", "An additional, reliable source for finding companies."],
-      how: ["يحتاج GOOGLE_PLACES_API_KEY. مدفوع حسب الاستخدام.", "Needs GOOGLE_PLACES_API_KEY. Paid per use."],
+      what: ["يبحث في Google Maps أولاً (تغطية أوسع بكثير في العراق)، ثم OpenStreetMap. يحفظ روابط فيسبوك وإنستغرام إن وُجدت. كل بحث يُسجّل في التكلفة.", "Searches Google Maps first (far wider coverage in Iraq), then OpenStreetMap. Keeps Facebook/Instagram links when listed. Every search is recorded in costs."],
+      how: ["أضف GOOGLE_PLACES_API_KEY في إعدادات Vercel ثم أعد النشر. مدفوع حسب الاستخدام.", "Add GOOGLE_PLACES_API_KEY in the Vercel settings, then redeploy. Paid per use."],
     },
   ];
 

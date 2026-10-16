@@ -103,10 +103,26 @@ export default async function LeadPage({ params, searchParams }: { params: Promi
             </div>
           )}
 
+          {socialLinks(c.attributes).length > 0 && (
+            <div className="mt-6 rounded-lg border border-line bg-surface p-5">
+              <h2 className="font-semibold">{ar ? "حساباتهم على التواصل الاجتماعي" : "Their social media"}</h2>
+              <p className="mt-1 text-xs text-muted">{ar ? "للتواصل اليدوي من حسابك. الوكيل لا يرسل رسائل عبر هذه المنصات." : "For contacting them yourself. The agent doesn't message on these platforms."}</p>
+              <ul className="mt-2 space-y-1 text-sm">
+                {socialLinks(c.attributes).map((u) => (
+                  <li key={u}>
+                    <a href={u} target="_blank" rel="noreferrer nofollow" className="text-lapis hover:underline" dir="ltr">{socialLabel(u)}</a>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
           <p className="pt-4 text-xs text-muted">
             {ar ? "المصدر" : "Source"}:{" "}
             {c.source_type === "csv_import" ? (ar ? "استيراد ملف" : "File import") : c.source_type === "api" && c.source_url?.includes("openstreetmap.org") ? (
               <a href={c.source_url} target="_blank" rel="noreferrer" className="text-lapis hover:underline">© OpenStreetMap contributors</a>
+            ) : c.source_type === "api" && c.source_ref?.startsWith("gplace:") && c.source_url ? (
+              <a href={c.source_url} target="_blank" rel="noreferrer" className="text-lapis hover:underline">Google Maps</a>
             ) : c.source_type}{" "}
             {c.source_type === "csv_import" && c.source_ref && <span dir="ltr">({c.source_ref})</span>}, {fmtDate(lang, c.discovered_at)}
           </p>
@@ -167,4 +183,18 @@ export default async function LeadPage({ params, searchParams }: { params: Promi
       </div>
     </div>
   );
+}
+
+/** Only well-formed https links to known social platforms are rendered. */
+function socialLinks(attributes: unknown): string[] {
+  const v = (attributes as { social?: unknown } | null)?.social;
+  if (!Array.isArray(v)) return [];
+  return v.filter((u): u is string => typeof u === "string" && /^https:\/\/([a-z0-9-]+\.)*(facebook\.com|fb\.com|instagram\.com|tiktok\.com|t\.me|wa\.me|linkedin\.com|x\.com|twitter\.com)\//i.test(u)).slice(0, 6);
+}
+
+function socialLabel(u: string): string {
+  const host = new URL(u).hostname.replace(/^(www|m)\./, "");
+  const name = ({ "facebook.com": "Facebook", "fb.com": "Facebook", "instagram.com": "Instagram", "tiktok.com": "TikTok", "t.me": "Telegram", "wa.me": "WhatsApp", "linkedin.com": "LinkedIn", "x.com": "X", "twitter.com": "X" } as Record<string, string>)[host] ?? host;
+  const path = new URL(u).pathname.replace(/\/$/, "");
+  return path && path !== "/" ? `${name} · ${decodeURIComponent(path.slice(1)).slice(0, 40)}` : name;
 }

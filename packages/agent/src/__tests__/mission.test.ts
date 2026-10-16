@@ -247,3 +247,82 @@ describe("http helpers", () => {
     expect(await fetchPage("https://pdf.iq/", f)).toMatchObject({ ok: false, error: expect.stringMatching(/not a web page/) });
   });
 });
+
+describe("Google Places source", () => {
+  const PLACES = "https://places.googleapis.com/v1/places:searchText";
+  const google = { apiKey: "AIza-test-key", pricePerRequest: 0.035 };
+  const page1 = {
+    nextPageToken: "p2",
+    places: [
+      // same hotel as OSM node 11 (same website): must not be stored twice
+      { id: "G1", displayName: { text: "فندق شط العرب" }, formattedAddress: "العشار، البصرة، العراق", websiteUri: "https://shatt-hotel.iq/", googleMapsUri: "https://maps.google.com/?cid=1", businessStatus: "OPERATIONAL", primaryType: "hotel" },
+      { id: "G2", displayName: { text: "فندق البصرة الدولي" }, formattedAddress: "البصرة، العراق", internationalPhoneNumber: "+964 780 333 4444", websiteUri: "https://www.facebook.com/basrahintl", googleMapsUri: "https://maps.google.com/?cid=2", businessStatus: "OPERATIONAL", primaryType: "hotel" },
+    ],
+  };
+  const page2 = { places: [{ id: "G3", displayName: { text: "فندق الكورنيش" }, formattedAddress: "البصرة", googleMapsUri: "https://maps.google.com/?cid=3", businessStatus: "OPERATIONAL", primaryType: "hotel" }] };
+
+  function withPlaces(status = 200) {
+    const base = fakeFetch();
+    const bodies: Record<string, unknown>[] = [];
+    const f = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === PLACES) {
+        const h = new Headers(init?.headers);
+        expect(h.get("X-Goog-Api-Key")).toBe(google.apiKey);
+        expect(h.get("X-Goog-FieldMask")).toContain("places.websiteUri");
+        const body = JSON.parse(String(init?.body));
+        bodies.push(body);
+        if (status !== 200) return new Response(JSON.stringify({ error: { status: "PERMISSION_DENIED", message: "Places API (New) has not been used in project" } }), { status });
+        return new Response(JSON.stringify(body.pageToken ? page2 : page1), { status: 200 });
+      }
+      return base.f(input, init);
+    }) as typeof fetch;
+    return { f, bodies, calls: base.calls };
+  }
+
+  it("searches Google first, pages through results, dedupes against OSM and records the cost", async () => {
+    const { db, mission } = setup();
+    const { f, bodies } = withPlaces();
+    await runMission({ ...mission, params: { ...mission.params, write_drafts: false } }, { db, fetch: f, ai: null, google, deadline: far() });
+
+    // one search term for hotels × 2 pages
+    expect(bodies.map((b) => b.textQuery)).toEqual(["فندق في البصرة", "فندق في البصرة"]);
+    const companies = db.rows("companies");
+    expect(companies.map((c) => c.name).sort()).toEqual(["فندق البصرة الدولي", "فندق الكورنيش", "فندق المناوي باشا", "فندق شط العرب"].sort());
+    const shatt = companies.find((c) => c.name === "فندق شط العرب")!;
+    expect(shatt).toMatchObject({ source_ref: "gplace:G1", website: "https://shatt-hotel.iq" });
+    expect(shatt.attributes).toMatchObject({ provider: "google" });
+    expect(companies.find((c) => c.source_ref === "gplace:G2")!.attributes).toMatchObject({ social: ["https://www.facebook.com/basrahintl"] });
+    expect(db.rows("usage_events")).toEqual([expect.objectContaining({ kind: "discover.google_places", quantity: 2, cost_usd: 0.07 })]);
+    const sources = db.rows("agent_events").filter((e) => e.type === "discover.found").map((e) => (e.data as { source: string }).source);
+    expect(sources).toEqual(["Google Maps", "OpenStreetMap"]);
+  });
+
+  it("a rejected key is reported once and OpenStreetMap still runs", async () => {
+    const { db, mission } = setup();
+    const { f } = withPlaces(403);
+    await runMission({ ...mission, params: { ...mission.params, write_drafts: false } }, { db, fetch: f, ai: null, google, deadline: far() });
+    const types = db.rows("agent_events").map((e) => e.type);
+    expect(types.filter((t) => t === "discover.google_config")).toHaveLength(1);
+    expect(db.rows("companies").map((c) => c.source_ref).sort()).toEqual(["osm:node/11", "osm:node/12"]);
+  });
+
+  it("without a key it never calls Google", async () => {
+    const { db, mission } = setup();
+    const { f, calls } = withPlaces();
+    await runMission(mission, { db, fetch: f, ai: null, deadline: far() });
+    expect(calls).not.toContain(PLACES);
+    expect(Object.keys((db.rows("agent_missions")[0]!.progress as { pairs: object }).pairs)).toEqual(["hotel|IQ-BA"]);
+  });
+
+  it("research adds social links found on the company's own website", async () => {
+    const { db, mission } = setup();
+    const { f } = fakeFetch();
+    const g = (async (input: RequestInfo | URL, init?: RequestInit) =>
+      String(input).startsWith("https://shatt-hotel.iq")
+        ? new Response(siteHtml.replace("</body>", '<a href="https://www.instagram.com/shatt.hotel/">ig</a></body>'), { status: 200, headers: { "content-type": "text/html" } })
+        : f(input, init)) as typeof fetch;
+    await runMission({ ...mission, params: { ...mission.params, write_drafts: false } }, { db, fetch: g, ai: null, deadline: far() });
+    const shatt = db.rows("companies").find((c) => c.source_ref === "osm:node/11")!;
+    expect(shatt.attributes).toMatchObject({ provider: "osm", social: ["https://www.instagram.com/shatt.hotel"] });
+  });
+});

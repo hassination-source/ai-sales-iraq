@@ -1,7 +1,7 @@
-import { runMission, type Db, type Mission } from "./mission";
+import { runMission, type Db, type GoogleConfig, type Mission } from "./mission";
 import { redactSecrets, type AiConfig } from "./ai";
 
-export { runMission, type Db, type Mission } from "./mission";
+export { runMission, type Db, type Mission, type GoogleConfig } from "./mission";
 export type { AiConfig } from "./ai";
 export { looksLikeAnthropicKey, redactSecrets } from "./ai";
 
@@ -10,14 +10,14 @@ export { looksLikeAnthropicKey, redactSecrets } from "./ai";
  * `db` must be a service-role Supabase client (RLS bypassed); every query in the
  * mission code is scoped to the mission's tenant explicitly.
  */
-export async function tick(db: Db, ai: AiConfig | null, budgetMs = 240_000, f: typeof fetch = fetch) {
+export async function tick(db: Db, ai: AiConfig | null, budgetMs = 240_000, f: typeof fetch = fetch, google: GoogleConfig | null = null) {
   const deadline = Date.now() + budgetMs;
   const { data: missions, error } = await db.rpc("worker_claim_missions", { p_limit: 2 });
   if (error) throw new Error(`claim failed: ${error.message}`);
   const results: { id: string; ok: boolean; error?: string }[] = [];
   for (const m of (missions ?? []) as Mission[]) {
     try {
-      await runMission(m, { db, fetch: f, ai, deadline });
+      await runMission(m, { db, fetch: f, ai, google, deadline });
       results.push({ id: m.id, ok: true });
     } catch (e) {
       const msg = redactSecrets(e instanceof Error ? e.message : String(e));

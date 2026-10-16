@@ -1,4 +1,4 @@
-import { isFetchableUrl } from "@ais/core";
+import { isFetchableUrl, PLACES_ENDPOINT, PLACES_FIELD_MASK } from "@ais/core";
 
 export type Fetch = typeof fetch;
 
@@ -98,4 +98,31 @@ async function readCapped(res: Response, max: number): Promise<string> {
     if (off >= all.length) break;
   }
   return new TextDecoder("utf-8", { fatal: false }).decode(all);
+}
+
+export type PlacesResult = { ok: true; json: unknown } | { ok: false; retryable: boolean; config: boolean; error: string };
+
+/** Google Places API (New) Text Search. The key is sent as a header, never in the URL. */
+export async function runPlacesSearch(body: Record<string, unknown>, apiKey: string, f: Fetch = fetch, timeoutMs = 15_000): Promise<PlacesResult> {
+  try {
+    const res = await f(PLACES_ENDPOINT, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Goog-Api-Key": apiKey, "X-Goog-FieldMask": PLACES_FIELD_MASK },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (res.ok) return { ok: true, json: await res.json() };
+    let msg = `HTTP ${res.status}`;
+    try {
+      const j = (await res.json()) as { error?: { message?: string; status?: string } };
+      if (j.error?.message) msg = `${msg}: ${j.error.status ?? ""} ${j.error.message}`.trim();
+    } catch {
+      /* body was not JSON; the status code is enough */
+    }
+    // 401/403: key invalid, API not enabled, billing off or key restricted — nothing a retry fixes
+    const config = res.status === 401 || res.status === 403;
+    return { ok: false, retryable: !config && res.status !== 400, config, error: msg.slice(0, 300) };
+  } catch (e) {
+    return { ok: false, retryable: true, config: false, error: e instanceof Error ? e.message : String(e) };
+  }
 }

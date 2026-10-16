@@ -38,11 +38,15 @@ export function describeEvent(e: AgentEvent, lang: Lang, segmentLabel: (key: str
       if (!Number(d.count))
         return ar ? `لم أجد ${seg} جديدة في ${gov(d.governorate, lang)}${Number(d.duplicates) ? ` (${n(d.duplicates, lang)} موجودة مسبقاً)` : ""}` : `No new ${seg.toLowerCase()} in ${gov(d.governorate, lang)}${Number(d.duplicates) ? ` (${d.duplicates} already in your leads)` : ""}`;
       return ar
-        ? `وجدت ${n(d.count, lang)} من ${seg} في ${gov(d.governorate, lang)}${Number(d.duplicates) ? `، وتجاهلت ${n(d.duplicates, lang)} مكررة` : ""}`
-        : `Found ${d.count} ${seg.toLowerCase()} in ${gov(d.governorate, lang)}${Number(d.duplicates) ? `, skipped ${d.duplicates} duplicates` : ""}`;
+        ? `وجدت ${n(d.count, lang)} من ${seg} في ${gov(d.governorate, lang)}${d.source ? ` عبر ${d.source}` : ""}${Number(d.duplicates) ? `، وتجاهلت ${n(d.duplicates, lang)} مكررة` : ""}`
+        : `Found ${d.count} ${seg.toLowerCase()} in ${gov(d.governorate, lang)}${d.source ? ` via ${d.source}` : ""}${Number(d.duplicates) ? `, skipped ${d.duplicates} duplicates` : ""}`;
     }
     case "discover.source_busy":
-      return ar ? `مصدر البيانات مشغول الآن. سأحاول مجدداً بعد ${n(d.retry_in_min, lang)} دقيقة` : `The directory is busy right now. Retrying in ${d.retry_in_min} min`;
+      return ar
+        ? `${d.source === "google" ? "Google Maps" : "مصدر البيانات"} مشغول الآن. سأحاول مجدداً بعد ${n(d.retry_in_min, lang)} دقيقة`
+        : `${d.source === "google" ? "Google Maps" : "The directory"} is busy right now. Retrying in ${d.retry_in_min} min`;
+    case "discover.google_config":
+      return ar ? `مفتاح Google Places مرفوض، أكملت بـOpenStreetMap فقط: ${d.error}` : `The Google Places key was refused, so I continued with OpenStreetMap only: ${d.error}`;
     case "discover.source_failed":
       return ar ? `تعذّر البحث عن ${segmentLabel(String(d.segment))} في ${gov(d.governorate, lang)}` : `Couldn't search ${segmentLabel(String(d.segment)).toLowerCase()} in ${gov(d.governorate, lang)}`;
     case "research.no_website":

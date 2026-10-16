@@ -24,10 +24,13 @@ export async function POST(req: NextRequest) {
     ? { apiKey, workspaceId: process.env.ANTHROPIC_WORKSPACE_ID || undefined, model: process.env.AI_MODEL ?? "claude-sonnet-5-5", priceIn: Number(process.env.AI_PRICE_IN ?? 3), priceOut: Number(process.env.AI_PRICE_OUT ?? 15) }
     : null;
 
+  const placesKey = process.env.GOOGLE_PLACES_API_KEY;
+  const google = placesKey ? { apiKey: placesKey, pricePerRequest: Number(process.env.GOOGLE_PLACES_PRICE ?? 0.035) } : null;
+
   // reply at once so the caller's short timeout doesn't cut the work off
   after(async () => {
     try {
-      const results = await tick(db, ai, 270_000);
+      const results = await tick(db, ai, 270_000, fetch, google);
       if (results.length) console.log("[agent] tick", JSON.stringify(results));
     } catch (e) {
       console.error("[agent] tick failed", e instanceof Error ? e.message : e);

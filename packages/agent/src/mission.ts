@@ -1,16 +1,21 @@
 import {
   buildOverpassQuery,
+  buildPlacesQuery,
   extractFacts,
   getPack,
   parseOverpass,
+  parsePlaces,
   resolveConfig,
   scoreCompany,
   SOCIAL_OR_WEBMAIL,
+  socialLinksFromHtml,
+  socialLinksFromTags,
   t,
+  type DiscoveredCompany,
   type EffectiveConfig,
   type WebsiteFacts,
 } from "@ais/core";
-import { backoffMs, fetchPage, runOverpass, type Fetch } from "./http";
+import { backoffMs, fetchPage, runOverpass, runPlacesSearch, type Fetch } from "./http";
 import { writeDraft, type AiConfig } from "./ai";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -46,9 +51,22 @@ export interface Deps {
   db: Db;
   fetch: Fetch;
   ai: AiConfig | null;
+  /** Google Places API key; when absent the agent uses OpenStreetMap only. */
+  google?: GoogleConfig | null;
   deadline: number;
   now?: () => Date;
 }
+
+export interface GoogleConfig {
+  apiKey: string;
+  /** USD per Text Search request (Enterprise SKU, before free usage). */
+  pricePerRequest: number;
+}
+
+/** Google Places content may only be cached briefly; re-fetch or drop after this. */
+const GOOGLE_CACHE_DAYS = 30;
+/** Text Search returns up to 20 per page and at most 60 per query. */
+const GOOGLE_MAX_PAGES = 3;
 
 const TAG_KEYS = ["operator", "brand", "opening_hours", "addr:street", "addr:city", "industrial", "man_made", "tourism", "amenity", "healthcare", "shop", "office", "craft", "landuse", "building", "description"];
 
@@ -121,46 +139,66 @@ type Ev = (type: string, data?: Record<string, unknown>, level?: string, extra?:
 /* ------------------------------------------------------------------ discover */
 type DiscoverResult = { kind: "done" } | { kind: "timeup" } | { kind: "wait"; ms: number };
 
+type Source = "osm" | "google";
+/** Pair keys: "seg|gov" (OpenStreetMap, the original format) and "google:seg|gov". */
+const pairKey = (src: Source, seg: string, gov: string) => (src === "osm" ? `${seg}|${gov}` : `google:${seg}|${gov}`);
+function parsePairKey(key: string): { src: Source; seg: string; gov: string } {
+  const google = key.startsWith("google:");
+  const [seg, gov] = (google ? key.slice(7) : key).split("|") as [string, string];
+  return { src: google ? "google" : "osm", seg, gov };
+}
+
 async function discover(m: Mission, cfg: EffectiveConfig, p: Progress, deps: Deps, ev: Ev): Promise<DiscoverResult> {
-  const { db } = deps;
-  const segments = cfg.segments.filter((s) => m.params.segments.includes(s.key) && s.discovery.osm.length);
-  for (const s of segments) for (const g of m.params.governorates) p.pairs![`${s.key}|${g}`] ??= { status: "pending", attempts: 0, found: 0 };
+  const segments = cfg.segments.filter((s) => m.params.segments.includes(s.key));
+  // Google first when available: it covers far more Iraqi businesses than OSM
+  if (deps.google) for (const s of segments) if (s.discovery.searchTerms.length) for (const g of m.params.governorates) p.pairs![pairKey("google", s.key, g)] ??= { status: "pending", attempts: 0, found: 0 };
+  for (const s of segments) if (s.discovery.osm.length) for (const g of m.params.governorates) p.pairs![pairKey("osm", s.key, g)] ??= { status: "pending", attempts: 0, found: 0 };
 
   let waitMs = Infinity;
-  for (const [key, st] of Object.entries(p.pairs!)) {
+  const entries = Object.entries(p.pairs!).sort(([a], [b]) => Number(b.startsWith("google:")) - Number(a.startsWith("google:")));
+  for (const [key, st] of entries) {
     if (st.status !== "pending") continue;
     if ((p.found ?? 0) >= m.params.limit) break;
     if (Date.now() > deps.deadline - 45_000) return { kind: "timeup" };
-    const [segKey, gov] = key.split("|") as [string, string];
+    const { src, seg: segKey, gov } = parsePairKey(key);
     const seg = segments.find((s) => s.key === segKey);
-    if (!seg) {
+    if (!seg || (src === "google" && !deps.google)) {
       st.status = "failed";
       continue;
     }
 
-    const res = await runOverpass(buildOverpassQuery(gov, seg.discovery.osm, 300), st.attempts, deps.fetch);
+    const res = src === "google" ? await searchGoogle(m, seg.discovery.searchTerms, gov, deps) : await searchOsm(seg.discovery.osm, gov, st.attempts, deps);
     if (!res.ok) {
       st.attempts++;
-      if (!res.retryable || st.attempts >= 6) {
+      if (res.config) {
         st.status = "failed";
-        await ev("discover.source_failed", { segment: segKey, governorate: gov, error: res.error }, "warning");
+        if (!p.notified?.google_config) {
+          p.notified = { ...p.notified, google_config: true };
+          await ev("discover.google_config", { error: res.error }, "error");
+        }
+      } else if (!res.retryable || st.attempts >= 6) {
+        st.status = "failed";
+        await ev("discover.source_failed", { segment: segKey, governorate: gov, error: res.error, source: src }, "warning");
       } else {
         waitMs = Math.min(waitMs, backoffMs(st.attempts));
-        if (st.attempts === 1) await ev("discover.source_busy", { segment: segKey, governorate: gov, retry_in_min: Math.round(backoffMs(1) / 60000) }, "info");
+        if (st.attempts === 1) await ev("discover.source_busy", { segment: segKey, governorate: gov, retry_in_min: Math.round(backoffMs(1) / 60000), source: src }, "info");
       }
       continue;
     }
 
-    const found = parseOverpass(res.json, gov);
-    // share the limit across every segment × governorate the user asked for
+    // share the limit across every source × segment × governorate
     const quota = Math.ceil(m.params.limit / Math.max(1, Object.keys(p.pairs!).length));
     const remaining = Math.min(quota, m.params.limit - (p.found ?? 0));
-    const { inserted, duplicates } = await insertCompanies(db, m, cfg, segKey, found, remaining);
+    const { inserted, duplicates } = await insertCompanies(deps.db, m, cfg, segKey, src, res.companies, remaining, deps.now?.() ?? new Date());
     st.status = "done";
     st.found = inserted;
     p.found = (p.found ?? 0) + inserted;
     p.duplicates = (p.duplicates ?? 0) + duplicates;
-    await ev("discover.found", { segment: segKey, segment_label: seg.label, governorate: gov, count: inserted, duplicates, total_in_source: found.length, source: "OpenStreetMap" }, inserted ? "success" : "info");
+    await ev(
+      "discover.found",
+      { segment: segKey, segment_label: seg.label, governorate: gov, count: inserted, duplicates, total_in_source: res.companies.length, source: src === "google" ? "Google Maps" : "OpenStreetMap" },
+      inserted ? "success" : "info",
+    );
   }
 
   const pending = Object.values(p.pairs!).some((s) => s.status === "pending");
@@ -169,28 +207,71 @@ async function discover(m: Mission, cfg: EffectiveConfig, p: Progress, deps: Dep
   return { kind: "done" };
 }
 
-async function insertCompanies(db: Db, m: Mission, cfg: EffectiveConfig, segKey: string, found: ReturnType<typeof parseOverpass>, remaining: number) {
+type Found = DiscoveredCompany & { social?: string[] };
+type SearchResult = { ok: true; companies: Found[] } | { ok: false; retryable: boolean; config: boolean; error: string };
+
+async function searchOsm(osm: Parameters<typeof buildOverpassQuery>[1], gov: string, attempt: number, deps: Deps): Promise<SearchResult> {
+  const res = await runOverpass(buildOverpassQuery(gov, osm, 300), attempt, deps.fetch);
+  if (!res.ok) return { ok: false, retryable: res.retryable, config: false, error: res.error };
+  return { ok: true, companies: parseOverpass(res.json, gov).map((c) => ({ ...c, social: socialLinksFromTags(c.tags) })) };
+}
+
+/** Every search term of the segment, up to three pages each; each request is billed and recorded. */
+async function searchGoogle(m: Mission, terms: Parameters<typeof buildPlacesQuery>[0][], gov: string, deps: Deps): Promise<SearchResult> {
+  const g = deps.google!;
+  const byRef = new Map<string, Found>();
+  let requests = 0;
+  try {
+    for (const term of terms) {
+      let token: string | undefined;
+      for (let page = 0; page < GOOGLE_MAX_PAGES; page++) {
+        if (Date.now() > deps.deadline - 50_000) break;
+        const res = await runPlacesSearch(buildPlacesQuery(term, gov, token), g.apiKey, deps.fetch);
+        requests++;
+        if (!res.ok) {
+          // keep what earlier pages found; fail only when nothing came back
+          if (byRef.size) break;
+          return res;
+        }
+        const parsed = parsePlaces(res.json, gov);
+        for (const c of parsed.companies) if (!byRef.has(c.source_ref)) byRef.set(c.source_ref, c);
+        if (!parsed.nextPageToken) break;
+        token = parsed.nextPageToken;
+      }
+    }
+  } finally {
+    if (requests)
+      await deps.db.from("usage_events").insert({ tenant_id: m.tenant_id, kind: "discover.google_places", quantity: requests, cost_usd: Number((requests * g.pricePerRequest).toFixed(4)), metadata: { governorate: gov, mission_id: m.id } });
+  }
+  return { ok: true, companies: [...byRef.values()] };
+}
+
+async function insertCompanies(db: Db, m: Mission, cfg: EffectiveConfig, segKey: string, src: Source, found: Found[], remaining: number, now: Date) {
   if (!found.length || remaining <= 0) return { inserted: 0, duplicates: 0 };
   const refs = found.map((c) => c.source_ref);
   const names = [...new Set(found.map((c) => c.name_normalized))];
   const phones = [...new Set(found.map((c) => c.phone).filter((x): x is string => !!x))];
   const emails = [...new Set(found.map((c) => c.email).filter((x): x is string => !!x))];
-  const [{ data: byRef }, { data: byName }, { data: byPhone }, { data: byEmail }] = await Promise.all([
+  const sites = [...new Set(found.map((c) => c.website).filter((x): x is string => !!x))];
+  const [{ data: byRef }, { data: byName }, { data: byPhone }, { data: byEmail }, { data: bySite }] = await Promise.all([
     db.from("companies").select("source_ref").eq("tenant_id", m.tenant_id).in("source_ref", refs),
     db.from("companies").select("name_normalized, governorate").eq("tenant_id", m.tenant_id).in("name_normalized", names),
     phones.length ? db.from("companies").select("phone").eq("tenant_id", m.tenant_id).in("phone", phones) : { data: [] },
     emails.length ? db.from("companies").select("email").eq("tenant_id", m.tenant_id).in("email", emails) : { data: [] },
+    sites.length ? db.from("companies").select("website").eq("tenant_id", m.tenant_id).in("website", sites) : { data: [] },
   ]);
   const seenRef = new Set((byRef ?? []).map((r: { source_ref: string }) => r.source_ref));
   const seenName = new Set((byName ?? []).map((r: { name_normalized: string; governorate: string | null }) => `${r.name_normalized}|${r.governorate ?? ""}`));
   const seenPhone = new Set((byPhone ?? []).map((r: { phone: string }) => r.phone));
   const seenEmail = new Set((byEmail ?? []).map((r: { email: string }) => r.email));
+  const seenSite = new Set((bySite ?? []).map((r: { website: string }) => r.website));
 
-  // same business listed several times (or already in the leads): same record, name, phone or email
+  // same business listed several times, or found by both sources: same record, name, phone, email or website
   const fresh = found.filter((c) => {
     const nameKey = `${c.name_normalized}|${c.governorate}`;
-    const dup = seenRef.has(c.source_ref) || seenName.has(nameKey) || (c.phone && seenPhone.has(c.phone)) || (c.email && seenEmail.has(c.email));
+    const dup = seenRef.has(c.source_ref) || seenName.has(nameKey) || (c.phone && seenPhone.has(c.phone)) || (c.email && seenEmail.has(c.email)) || (c.website && seenSite.has(c.website));
     seenName.add(nameKey);
+    if (c.website) seenSite.add(c.website);
     if (c.phone) seenPhone.add(c.phone);
     if (c.email) seenEmail.add(c.email);
     return !dup;
@@ -202,7 +283,14 @@ async function insertCompanies(db: Db, m: Mission, cfg: EffectiveConfig, segKey:
 
   const rows = take.map((c) => {
     const osm = Object.fromEntries(Object.entries(c.tags).filter(([k]) => TAG_KEYS.includes(k)).map(([k, v]) => [k, v.slice(0, 200)]));
-    const attributes: Record<string, unknown> = { segment: segKey, osm, ...(c.name_en ? { name_en: c.name_en } : {}), ...(c.lat !== null ? { lat: c.lat, lon: c.lon } : {}) };
+    const attributes: Record<string, unknown> = {
+      segment: segKey,
+      provider: src,
+      ...(src === "osm" ? { osm } : { google: { ...c.tags, expires_at: new Date(now.getTime() + GOOGLE_CACHE_DAYS * 86_400_000).toISOString() } }),
+      ...(c.social?.length ? { social: c.social } : {}),
+      ...(c.name_en ? { name_en: c.name_en } : {}),
+      ...(c.lat !== null ? { lat: c.lat, lon: c.lon } : {}),
+    };
     const score = scoreCompany(cfg, { governorate: c.governorate, phone: c.phone, website: c.website, email: c.email, verification_status: "unverified", attributes });
     return {
       tenant_id: m.tenant_id,
@@ -246,7 +334,7 @@ async function research(m: Mission, _cfg: EffectiveConfig, p: Progress, deps: De
     if (Date.now() > deps.deadline - 20_000) return "timeup";
     const { data: batch } = await db
       .from("companies")
-      .select("id, name, website, email, phone")
+      .select("id, name, website, email, phone, attributes")
       .eq("tenant_id", m.tenant_id)
       .eq("mission_id", m.id)
       .not("website", "is", null)
@@ -259,7 +347,7 @@ async function research(m: Mission, _cfg: EffectiveConfig, p: Progress, deps: De
     if (!todo.length) return "done";
 
     await Promise.all(
-      todo.map(async (c: { id: string; name: string; website: string; email: string | null; phone: string | null }) => {
+      todo.map(async (c: { id: string; name: string; website: string; email: string | null; phone: string | null; attributes: Record<string, unknown> | null }) => {
         if (isNotCompanySite(c.website)) {
           await db.from("company_research").upsert({ tenant_id: m.tenant_id, company_id: c.id, url: c.website, status: "skipped", error: "social or webmail page" }, { onConflict: "tenant_id,company_id" });
           return;
@@ -276,9 +364,12 @@ async function research(m: Mission, _cfg: EffectiveConfig, p: Progress, deps: De
           { onConflict: "tenant_id,company_id" },
         );
         // contact details published on the company's own site fill gaps (never overwrite)
-        const patch: Record<string, string> = {};
+        const patch: Record<string, unknown> = {};
         if (!c.email && f.emails[0]) patch.email = f.emails[0];
         if (!c.phone && f.phones[0]) patch.phone = f.phones[0];
+        const known = Array.isArray(c.attributes?.social) ? (c.attributes.social as string[]) : [];
+        const social = [...new Set([...known, ...socialLinksFromHtml(page.html)])].slice(0, 6);
+        if (social.length > known.length) patch.attributes = { ...(c.attributes ?? {}), social };
         if (Object.keys(patch).length) await db.from("companies").update(patch).eq("id", c.id).eq("tenant_id", m.tenant_id);
         p.researched = (p.researched ?? 0) + 1;
         await ev("research.done", { name: c.name, title: f.title, emails: f.emails.length, phones: f.phones.length }, "success", { company_id: c.id });
