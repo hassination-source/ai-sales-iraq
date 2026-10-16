@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { LocalizedText, LOCALES } from "./i18n";
+import { OsmTagFilter } from "./discovery/osm";
 
 /**
  * Industry pack: everything industry-specific lives here as data.
@@ -54,7 +55,21 @@ export const ScoringRule = z
 export type ScoringRule = z.infer<typeof ScoringRule>;
 
 export const Segment = z
-  .object({ key: Key, label: LocalizedText, painPoints: z.array(LocalizedText).default([]) })
+  .object({
+    key: Key,
+    label: LocalizedText,
+    painPoints: z.array(LocalizedText).default([]),
+    /** How the agent finds this kind of business in public directories */
+    discovery: z
+      .object({
+        /** OpenStreetMap: any matching group (all conditions in a group must hold) */
+        osm: z.array(z.array(OsmTagFilter).min(1)).default([]),
+        /** free-text searches for providers like Google Places */
+        searchTerms: z.array(LocalizedText).default([]),
+      })
+      .strict()
+      .default({}),
+  })
   .strict();
 
 export const IndustryPack = z

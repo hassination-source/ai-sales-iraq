@@ -1,0 +1,122 @@
+import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
+import { z } from "zod";
+import { getContext } from "@/lib/tenant";
+import { supabaseServer } from "@/lib/supabase/server";
+import { integrationStatus } from "@/lib/supabase/service";
+import { getLang } from "@/lib/i18n";
+
+async function saveSettings(formData: FormData) {
+  "use server";
+  const ctx = await getContext();
+  if (!["owner", "admin"].includes(ctx.role)) redirect("/settings?error=role");
+  const parsed = z
+    .object({
+      paused: z.boolean(),
+      daily_draft_limit: z.coerce.number().int().min(0).max(200),
+      draft_language: z.enum(["ar-IQ", "ar", "en"]),
+      sender_name: z.string().trim().max(120),
+    })
+    .safeParse({ paused: formData.get("paused") === "on", daily_draft_limit: formData.get("daily_draft_limit"), draft_language: formData.get("draft_language"), sender_name: formData.get("sender_name") ?? "" });
+  if (!parsed.success) redirect("/settings?error=invalid");
+  const sb = await supabaseServer();
+  const { error } = await sb.from("agent_settings").upsert({ tenant_id: ctx.tenant.id, ...parsed.data, sender_name: parsed.data.sender_name || null, updated_by: ctx.userId });
+  if (error) redirect(`/settings?error=${encodeURIComponent(error.message)}`);
+  revalidatePath("/", "layout");
+  redirect("/settings?saved=1");
+}
+
+export default async function SettingsPage({ searchParams }: { searchParams: Promise<{ error?: string; saved?: string }> }) {
+  const sp = await searchParams;
+  const ctx = await getContext();
+  const lang = await getLang();
+  const ar = lang === "ar";
+  const sb = await supabaseServer();
+  const { data: s } = await sb.from("agent_settings").select("*").eq("tenant_id", ctx.tenant.id).maybeSingle();
+  const st = integrationStatus();
+  const canEdit = ["owner", "admin"].includes(ctx.role);
+
+  const rows: { ok: boolean; name: [string, string]; what: [string, string]; how: [string, string] }[] = [
+    {
+      ok: st.worker && st.workerProjectMatches,
+      name: ["البحث وقراءة المواقع", "Finding companies & reading websites"],
+      what: ["يبحث في OpenStreetMap (© OpenStreetMap contributors) ويقرأ مواقع الشركات العامة.", "Searches OpenStreetMap (© OpenStreetMap contributors) and reads companies' public websites."],
+      how: [st.workerProjectMatches ? "مفعّل عبر ربط Supabase في Vercel." : "مفتاح Supabase في Vercel يشير إلى مشروع آخر.", st.workerProjectMatches ? "Enabled through the Supabase integration in Vercel." : "The Supabase key in Vercel points to a different project."],
+    },
+    {
+      ok: st.ai,
+      name: ["كتابة الرسائل بالذكاء الاصطناعي", "AI message writing"],
+      what: ["يكتب رسالة أولى لكل شركة اعتماداً على قاعدة المعرفة وموقع الشركة فقط.", "Writes a first message to each company using only your knowledge base and the company's own website."],
+      how: ["يحتاج مفتاح ANTHROPIC_API_KEY في إعدادات Vercel.", "Needs ANTHROPIC_API_KEY in the Vercel project settings."],
+    },
+    {
+      ok: st.email,
+      name: ["إرسال البريد والردود", "Sending email & replies"],
+      what: ["يرسل الرسائل الموافق عليها من نطاق مخصص ويقرأ الردود.", "Sends approved messages from a dedicated domain and reads the replies."],
+      how: ["الخطوة القادمة: يحتاج نطاق إرسال (مثلاً sales.sigensol.com).", "Next step: needs a sending domain (e.g. sales.sigensol.com)."],
+    },
+    {
+      ok: st.googlePlaces,
+      name: ["Google Places (اختياري)", "Google Places (optional)"],
+      what: ["مصدر إضافي موثوق للعثور على الشركات.", "An additional, reliable source for finding companies."],
+      how: ["يحتاج GOOGLE_PLACES_API_KEY. مدفوع حسب الاستخدام.", "Needs GOOGLE_PLACES_API_KEY. Paid per use."],
+    },
+  ];
+
+  return (
+    <div className="max-w-3xl space-y-8">
+      <h1 className="text-2xl font-semibold">{ar ? "الإعدادات" : "Settings"}</h1>
+      {sp.saved && <p className="note-info">{ar ? "تم الحفظ." : "Saved."}</p>}
+      {sp.error && <p className="note-error">{sp.error === "role" ? (ar ? "فقط المالك أو المسؤول." : "Owner or admin only.") : sp.error === "invalid" ? (ar ? "تحقق من القيم." : "Check the values.") : sp.error}</p>}
+
+      <section>
+        <h2 className="text-lg font-semibold">{ar ? "الوكيل" : "Agent"}</h2>
+        <form action={saveSettings} className="mt-3 space-y-4 rounded-lg border border-line bg-surface p-5">
+          <fieldset disabled={!canEdit} className="space-y-4">
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" name="paused" defaultChecked={s?.paused ?? false} className="accent-lapis" />
+              {ar ? "إيقاف الوكيل مؤقتاً (يتوقف عن كل المهام فوراً)" : "Pause the agent (stops all missions immediately)"}
+            </label>
+            <div className="grid gap-4 sm:grid-cols-3">
+              <div>
+                <label className="label" htmlFor="daily_draft_limit">{ar ? "حد الرسائل اليومي" : "Daily message limit"}</label>
+                <input className="field" id="daily_draft_limit" name="daily_draft_limit" type="number" min={0} max={200} defaultValue={s?.daily_draft_limit ?? 20} />
+              </div>
+              <div>
+                <label className="label" htmlFor="draft_language">{ar ? "لغة الرسائل" : "Message language"}</label>
+                <select className="field" id="draft_language" name="draft_language" defaultValue={s?.draft_language ?? "ar-IQ"}>
+                  <option value="ar-IQ">{ar ? "عراقي" : "Iraqi Arabic"}</option>
+                  <option value="ar">{ar ? "عربي فصيح" : "Standard Arabic"}</option>
+                  <option value="en">English</option>
+                </select>
+              </div>
+              <div>
+                <label className="label" htmlFor="sender_name">{ar ? "اسم المرسل" : "Sender name"}</label>
+                <input className="field" id="sender_name" name="sender_name" defaultValue={s?.sender_name ?? ""} placeholder={ar ? "مثال: حسن" : "e.g. Hassan"} />
+              </div>
+            </div>
+            {canEdit && <button className="btn-primary">{ar ? "حفظ" : "Save"}</button>}
+          </fieldset>
+        </form>
+      </section>
+
+      <section>
+        <h2 className="text-lg font-semibold">{ar ? "الاتصالات" : "Connections"}</h2>
+        <ul className="mt-3 divide-y divide-line rounded-lg border border-line bg-surface">
+          {rows.map((r) => (
+            <li key={r.name[1]} className="flex gap-4 p-4">
+              <span className={`mt-1 h-fit shrink-0 rounded-full px-2 py-0.5 text-xs ${r.ok ? "bg-lapis-soft text-lapis-deep" : "bg-paper text-muted ring-1 ring-line"}`}>
+                {r.ok ? (ar ? "مفعّل" : "On") : ar ? "غير مفعّل" : "Off"}
+              </span>
+              <div className="text-sm">
+                <p className="font-medium">{r.name[ar ? 0 : 1]}</p>
+                <p className="text-muted">{r.what[ar ? 0 : 1]}</p>
+                {!r.ok && <p className="mt-1 text-xs text-muted">{r.how[ar ? 0 : 1]}</p>}
+              </div>
+            </li>
+          ))}
+        </ul>
+      </section>
+    </div>
+  );
+}

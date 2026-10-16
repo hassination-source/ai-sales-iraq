@@ -14,10 +14,28 @@ export const autoPartsPack = definePack({
     en: "Wholesale parts to workshops, dealers and fleet operators",
   },
   segments: [
-    { key: "workshop", label: { ar: "ورش تصليح", en: "Repair workshops" }, painPoints: [{ ar: "تأخر توفر القطع", en: "Slow parts availability" }] },
-    { key: "parts_retailer", label: { ar: "محلات قطع غيار", en: "Parts retailers" } },
-    { key: "fleet", label: { ar: "أساطيل نقل وشركات", en: "Fleet operators" }, painPoints: [{ ar: "توقف المركبات عن العمل", en: "Vehicle downtime" }] },
-    { key: "dealer", label: { ar: "وكلاء سيارات", en: "Car dealers" } },
+    {
+      key: "workshop",
+      label: { ar: "ورش تصليح", en: "Repair workshops" },
+      painPoints: [{ ar: "تأخر توفر القطع", en: "Slow parts availability" }],
+      discovery: { osm: [[{ key: "shop", value: "car_repair|tyres", regex: true }], [{ key: "craft", value: "car_repair" }]], searchTerms: [{ ar: "ورشة تصليح سيارات", en: "car repair" }] },
+    },
+    {
+      key: "parts_retailer",
+      label: { ar: "محلات قطع غيار", en: "Parts retailers" },
+      discovery: { osm: [[{ key: "shop", value: "car_parts" }]], searchTerms: [{ ar: "قطع غيار سيارات", en: "car parts" }] },
+    },
+    {
+      key: "fleet",
+      label: { ar: "أساطيل نقل وشركات", en: "Fleet operators" },
+      painPoints: [{ ar: "توقف المركبات عن العمل", en: "Vehicle downtime" }],
+      discovery: { osm: [[{ key: "office", value: "logistics|moving_company", regex: true }], [{ key: "amenity", value: "car_rental|bus_station", regex: true }]], searchTerms: [{ ar: "شركة نقل", en: "logistics company" }] },
+    },
+    {
+      key: "dealer",
+      label: { ar: "وكلاء سيارات", en: "Car dealers" },
+      discovery: { osm: [[{ key: "shop", value: "car" }]], searchTerms: [{ ar: "معرض سيارات", en: "car dealer" }] },
+    },
   ],
   companyFields: [
     {

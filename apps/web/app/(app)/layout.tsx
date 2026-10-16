@@ -1,5 +1,6 @@
 import { t as tx } from "@ais/core";
 import { getContext } from "@/lib/tenant";
+import { supabaseServer } from "@/lib/supabase/server";
 import { getLang, translator } from "@/lib/i18n";
 import { NavLinks } from "@/components/nav-links";
 import { LangSwitch } from "@/components/lang-switch";
@@ -8,6 +9,8 @@ import { signOut } from "@/app/actions";
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const ctx = await getContext();
   const lang = await getLang();
+  const sb = await supabaseServer();
+  const { count: waiting } = await sb.from("message_drafts").select("id", { count: "exact", head: true }).eq("tenant_id", ctx.tenant.id).eq("status", "pending_review");
   const t = translator(lang);
   return (
     <div className="md:grid md:min-h-dvh md:grid-cols-[15rem_1fr]">
@@ -20,10 +23,13 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         <nav className="overflow-x-auto">
           <NavLinks
             items={[
-              { href: "/", label: t("nav.dashboard") },
+              { href: "/", label: lang === "ar" ? "الوكيل" : "Agent" },
+              { href: "/approvals", label: lang === "ar" ? "الموافقات" : "Approvals", badge: waiting ?? 0 },
               { href: "/leads", label: t("nav.leads") },
               { href: "/pipeline", label: t("nav.pipeline") },
-              { href: "/leads/import", label: t("nav.import") },
+              { href: "/knowledge", label: lang === "ar" ? "قاعدة المعرفة" : "Knowledge" },
+              { href: "/reports", label: lang === "ar" ? "التقارير" : "Reports" },
+              { href: "/settings", label: lang === "ar" ? "الإعدادات" : "Settings" },
             ]}
           />
         </nav>

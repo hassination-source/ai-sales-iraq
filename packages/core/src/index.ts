@@ -5,3 +5,6 @@ export * from "./qualification";
 export * from "./scoring";
 export * from "./leads/import";
 export * from "./packs";
+export * from "./discovery/osm";
+export * from "./research/extract";
+export * from "./ai/draft";

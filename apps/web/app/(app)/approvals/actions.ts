@@ -1,0 +1,49 @@
+"use server";
+
+import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
+import { z } from "zod";
+import { getContext } from "@/lib/tenant";
+import { supabaseServer } from "@/lib/supabase/server";
+
+const back: (q: string) => never = (q) => redirect(`/approvals?${q}`);
+
+export async function saveDraft(draftId: string, formData: FormData) {
+  const ctx = await getContext();
+  const parsed = z.object({ subject: z.string().trim().min(1).max(150), body: z.string().trim().min(10).max(3000) }).safeParse({ subject: formData.get("subject"), body: formData.get("body") });
+  if (!parsed.success) back("error=invalid");
+  const sb = await supabaseServer();
+  const { error } = await sb.from("message_drafts").update(parsed.data).eq("id", draftId).eq("tenant_id", ctx.tenant.id).eq("status", "pending_review");
+  if (error) back(`error=${encodeURIComponent(error.message)}`);
+  revalidatePath("/approvals");
+  back("saved=1");
+}
+
+/** Approve (optionally with edits in the same step) or reject. Database triggers enforce who may do this. */
+export async function reviewDraft(draftId: string, decision: "approved" | "rejected", formData: FormData) {
+  const ctx = await getContext();
+  if (!["owner", "admin", "manager"].includes(ctx.role)) back("error=role");
+  const sb = await supabaseServer();
+  if (decision === "approved") {
+    const subject = String(formData.get("subject") ?? "").trim();
+    const body = String(formData.get("body") ?? "").trim();
+    if (subject && body) {
+      const { error } = await sb.from("message_drafts").update({ subject, body }).eq("id", draftId).eq("tenant_id", ctx.tenant.id).eq("status", "pending_review");
+      if (error) back(`error=${encodeURIComponent(error.message)}`);
+    }
+  }
+  const reason = String(formData.get("reject_reason") ?? "").trim().slice(0, 300);
+  const { data: draft, error } = await sb
+    .from("message_drafts")
+    .update({ status: decision, reject_reason: decision === "rejected" ? reason || null : null })
+    .eq("id", draftId)
+    .eq("tenant_id", ctx.tenant.id)
+    .eq("status", "pending_review")
+    .select("company_id")
+    .single();
+  if (error) back(`error=${encodeURIComponent(error.message)}`);
+  await sb.from("activities").insert({ tenant_id: ctx.tenant.id, type: decision === "approved" ? "draft.approved" : "draft.rejected", company_id: draft?.company_id ?? null, actor_id: ctx.userId, payload: { draft_id: draftId } });
+  revalidatePath("/approvals");
+  revalidatePath("/");
+  back(decision === "approved" ? "approved=1" : "rejected=1");
+}

@@ -16,10 +16,11 @@ export default async function LeadPage({ params, searchParams }: { params: Promi
   const ar = lang === "ar";
   const sb = await supabaseServer();
 
-  const [{ data: c }, { data: deals }, { data: contacts }] = await Promise.all([
+  const [{ data: c }, { data: deals }, { data: contacts }, { data: research }] = await Promise.all([
     sb.from("companies").select("*").eq("id", id).maybeSingle(),
     sb.from("deals").select("id, title, value_amount, currency, stage_id").eq("company_id", id).order("created_at", { ascending: false }),
     sb.from("contacts").select("id, full_name, job_title, phone, email").eq("company_id", id),
+    sb.from("company_research").select("url, status, title, description, emails, phones, error, fetched_at").eq("company_id", id).maybeSingle(),
   ]);
   if (!c) notFound();
 
@@ -83,8 +84,31 @@ export default async function LeadPage({ params, searchParams }: { params: Promi
             </div>
           )}
 
+          {research && (
+            <div className="mt-6 rounded-lg border border-line bg-surface p-5">
+              <h2 className="font-semibold">{ar ? "ما وجده الوكيل في موقعهم" : "What the agent found on their website"}</h2>
+              {research.status === "ok" ? (
+                <div className="mt-2 space-y-1 text-sm">
+                  {research.title && <p className="font-medium">{research.title}</p>}
+                  {research.description && <p className="text-muted">{research.description}</p>}
+                  {research.emails.length > 0 && <p dir="ltr" className="text-start">{research.emails.join(", ")}</p>}
+                  {research.phones.length > 0 && <p dir="ltr" className="text-start">{research.phones.join(", ")}</p>}
+                  <p className="pt-1 text-xs text-muted">
+                    <a href={research.url ?? "#"} target="_blank" rel="noreferrer" className="text-lapis hover:underline" dir="ltr">{research.url}</a>, {fmtDate(lang, research.fetched_at)}
+                  </p>
+                </div>
+              ) : (
+                <p className="mt-2 text-sm text-muted">{ar ? "تعذّر فتح الموقع" : "The website couldn't be opened"} ({research.error})</p>
+              )}
+            </div>
+          )}
+
           <p className="pt-4 text-xs text-muted">
-            {ar ? "المصدر" : "Source"}: {c.source_type === "csv_import" ? (ar ? "استيراد ملف" : "File import") : c.source_type} {c.source_ref && <span dir="ltr">({c.source_ref})</span>}, {fmtDate(lang, c.discovered_at)}
+            {ar ? "المصدر" : "Source"}:{" "}
+            {c.source_type === "csv_import" ? (ar ? "استيراد ملف" : "File import") : c.source_type === "api" && c.source_url?.includes("openstreetmap.org") ? (
+              <a href={c.source_url} target="_blank" rel="noreferrer" className="text-lapis hover:underline">© OpenStreetMap contributors</a>
+            ) : c.source_type}{" "}
+            {c.source_type === "csv_import" && c.source_ref && <span dir="ltr">({c.source_ref})</span>}, {fmtDate(lang, c.discovered_at)}
           </p>
         </section>
 

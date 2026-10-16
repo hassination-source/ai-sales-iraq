@@ -9,8 +9,14 @@ export async function freshDb(): Promise<PGlite> {
   const db = new PGlite();
   await db.exec(readFileSync(join(import.meta.dirname, "supabase-stub.sql"), "utf8"));
   for (const f of readdirSync(migrationsDir).filter((f) => f.endsWith(".sql")).sort()) {
-    await db.exec(readFileSync(join(migrationsDir, f), "utf8"));
+    // Supabase-only extensions are provided by supabase-stub.sql
+    const sql = readFileSync(join(migrationsDir, f), "utf8").replace(/^create extension if not exists (pg_net|pg_cron)[^;]*;$/gim, "");
+    await db.exec(sql);
   }
+  // Mirror Supabase defaults: the service role (used by the worker) has full table privileges.
+  await db.exec(`grant all on all tables in schema public to service_role;
+    grant usage, select on all sequences in schema public to service_role;
+    grant usage on schema vault to service_role; grant select on vault.decrypted_secrets to service_role;`);
   return db;
 }
 

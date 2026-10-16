@@ -22,15 +22,54 @@ export const solarEnergyPack = definePack({
         { ar: "تكلفة وقود المولدات", en: "Generator fuel cost" },
         { ar: "انقطاع الكهرباء يوقف الإنتاج", en: "Grid outages stop production" },
       ],
+      discovery: {
+        osm: [[{ key: "man_made", value: "works" }], [{ key: "industrial" }], [{ key: "craft", value: "brewery|winery|distillery|confectionery|bakery", regex: true }]],
+        searchTerms: [{ ar: "مصنع", en: "factory" }, { ar: "معمل", en: "plant" }],
+      },
     },
-    { key: "hotel", label: { ar: "فنادق", en: "Hotels" }, painPoints: [{ ar: "الحاجة لكهرباء مستمرة للنزلاء", en: "Need for uninterrupted power for guests" }] },
-    { key: "hospital", label: { ar: "مستشفيات ومراكز صحية", en: "Hospitals & clinics" }, painPoints: [{ ar: "أجهزة حرجة تحتاج طاقة احتياطية", en: "Critical equipment needs backup power" }] },
-    { key: "commercial_building", label: { ar: "مبانٍ تجارية", en: "Commercial buildings" } },
-    { key: "education", label: { ar: "مدارس وجامعات", en: "Schools & universities" } },
-    { key: "retail", label: { ar: "مولات ومطاعم وسلاسل تجارية", en: "Malls, restaurants & retail chains" } },
-    { key: "real_estate", label: { ar: "مطورون عقاريون وشركات إنشاء", en: "Real-estate developers & construction" } },
-    { key: "agriculture", label: { ar: "مشاريع زراعية", en: "Agricultural businesses" }, painPoints: [{ ar: "ضخ المياه في مناطق بعيدة عن الشبكة", en: "Water pumping far from the grid" }] },
-    { key: "channel_partner", label: { ar: "مقاولو EPC وكهربائيون وموزعون", en: "EPC contractors, installers & resellers" } },
+    {
+      key: "hotel",
+      label: { ar: "فنادق", en: "Hotels" },
+      painPoints: [{ ar: "الحاجة لكهرباء مستمرة للنزلاء", en: "Need for uninterrupted power for guests" }],
+      discovery: { osm: [[{ key: "tourism", value: "hotel|motel|guest_house", regex: true }]], searchTerms: [{ ar: "فندق", en: "hotel" }] },
+    },
+    {
+      key: "hospital",
+      label: { ar: "مستشفيات ومراكز صحية", en: "Hospitals & clinics" },
+      painPoints: [{ ar: "أجهزة حرجة تحتاج طاقة احتياطية", en: "Critical equipment needs backup power" }],
+      discovery: { osm: [[{ key: "amenity", value: "hospital|clinic", regex: true }], [{ key: "healthcare", value: "hospital|clinic|centre", regex: true }]], searchTerms: [{ ar: "مستشفى", en: "hospital" }] },
+    },
+    {
+      key: "commercial_building",
+      label: { ar: "مبانٍ تجارية", en: "Commercial buildings" },
+      discovery: { osm: [[{ key: "building", value: "commercial|office", regex: true }], [{ key: "office", value: "company" }]], searchTerms: [{ ar: "مجمع تجاري", en: "business center" }] },
+    },
+    {
+      key: "education",
+      label: { ar: "مدارس وجامعات", en: "Schools & universities" },
+      discovery: { osm: [[{ key: "amenity", value: "university|college|school", regex: true }]], searchTerms: [{ ar: "جامعة", en: "university" }] },
+    },
+    {
+      key: "retail",
+      label: { ar: "مولات ومطاعم وسلاسل تجارية", en: "Malls, restaurants & retail chains" },
+      discovery: { osm: [[{ key: "shop", value: "mall|supermarket|department_store", regex: true }], [{ key: "amenity", value: "restaurant" }]], searchTerms: [{ ar: "مول", en: "mall" }] },
+    },
+    {
+      key: "real_estate",
+      label: { ar: "مطورون عقاريون وشركات إنشاء", en: "Real-estate developers & construction" },
+      discovery: { osm: [[{ key: "office", value: "estate_agent|construction_company|architect", regex: true }], [{ key: "craft", value: "builder" }]], searchTerms: [{ ar: "شركة مقاولات", en: "construction company" }] },
+    },
+    {
+      key: "agriculture",
+      label: { ar: "مشاريع زراعية", en: "Agricultural businesses" },
+      painPoints: [{ ar: "ضخ المياه في مناطق بعيدة عن الشبكة", en: "Water pumping far from the grid" }],
+      discovery: { osm: [[{ key: "landuse", value: "farmyard|greenhouse_horticulture|aquaculture", regex: true }], [{ key: "place", value: "farm" }], [{ key: "shop", value: "agrarian" }]], searchTerms: [{ ar: "مشروع زراعي", en: "farm" }] },
+    },
+    {
+      key: "channel_partner",
+      label: { ar: "مقاولو EPC وكهربائيون وموزعون", en: "EPC contractors, installers & resellers" },
+      discovery: { osm: [[{ key: "shop", value: "electrical|hardware|energy", regex: true }], [{ key: "craft", value: "electrician" }]], searchTerms: [{ ar: "مواد كهربائية", en: "electrical supplies" }] },
+    },
   ],
   companyFields: [
     {
