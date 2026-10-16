@@ -25,7 +25,7 @@ export async function POST(req: NextRequest) {
     : null;
 
   const placesKey = process.env.GOOGLE_PLACES_API_KEY;
-  const google = placesKey ? { apiKey: placesKey, pricePerRequest: Number(process.env.GOOGLE_PLACES_PRICE ?? 0.035) } : null;
+  const google = placesKey ? { apiKey: placesKey, pricePerRequest: Number(process.env.GOOGLE_PLACES_PRICE ?? 0.035), maxRequestsPerMission: Number(process.env.GOOGLE_PLACES_MAX_REQUESTS ?? 40) } : null;
 
   // reply at once so the caller's short timeout doesn't cut the work off
   after(async () => {

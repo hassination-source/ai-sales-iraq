@@ -250,7 +250,7 @@ describe("http helpers", () => {
 
 describe("Google Places source", () => {
   const PLACES = "https://places.googleapis.com/v1/places:searchText";
-  const google = { apiKey: "AIza-test-key", pricePerRequest: 0.035 };
+  const google = { apiKey: "AIza-test-key", pricePerRequest: 0.035, maxRequestsPerMission: 40 };
   const page1 = {
     nextPageToken: "p2",
     places: [
@@ -295,6 +295,19 @@ describe("Google Places source", () => {
     expect(db.rows("usage_events")).toEqual([expect.objectContaining({ kind: "discover.google_places", quantity: 2, cost_usd: 0.07 })]);
     const sources = db.rows("agent_events").filter((e) => e.type === "discover.found").map((e) => (e.data as { source: string }).source);
     expect(sources).toEqual(["Google Maps", "OpenStreetMap"]);
+  });
+
+  it("pages only while more companies are needed, and stops at the mission's request budget", async () => {
+    const { db, mission } = setup({ limit: 2, write_drafts: false });
+    const { f, bodies } = withPlaces();
+    await runMission(mission, { db, fetch: f, ai: null, google, deadline: far() });
+    expect(bodies).toHaveLength(1); // quota 1 per pair: the first page (2 results) is plenty
+
+    const s2 = setup({ write_drafts: false });
+    const w2 = withPlaces();
+    await runMission(s2.mission, { db: s2.db, fetch: w2.f, ai: null, google: { ...google, maxRequestsPerMission: 1 }, deadline: far() });
+    expect(w2.bodies).toHaveLength(1);
+    expect(s2.db.rows("agent_events").map((e) => e.type)).not.toContain("discover.google_config");
   });
 
   it("a rejected key is reported once and OpenStreetMap still runs", async () => {

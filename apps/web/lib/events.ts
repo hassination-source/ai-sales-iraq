@@ -45,6 +45,8 @@ export function describeEvent(e: AgentEvent, lang: Lang, segmentLabel: (key: str
       return ar
         ? `${d.source === "google" ? "Google Maps" : "مصدر البيانات"} مشغول الآن. سأحاول مجدداً بعد ${n(d.retry_in_min, lang)} دقيقة`
         : `${d.source === "google" ? "Google Maps" : "The directory"} is busy right now. Retrying in ${d.retry_in_min} min`;
+    case "discover.google_budget":
+      return ar ? `وصلت لحد بحث Google لهذه المهمة (${n(d.requests, lang)} طلب). أكمل بـOpenStreetMap` : `Reached this mission's Google search budget (${d.requests} requests). Continuing with OpenStreetMap`;
     case "discover.google_config":
       return ar ? `مفتاح Google Places مرفوض، أكملت بـOpenStreetMap فقط: ${d.error}` : `The Google Places key was refused, so I continued with OpenStreetMap only: ${d.error}`;
     case "discover.source_failed":

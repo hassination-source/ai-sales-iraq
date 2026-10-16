@@ -44,6 +44,7 @@ interface Progress {
   researched?: number;
   drafted?: number;
   skipped?: number;
+  google_requests?: number;
   notified?: Record<string, boolean>;
 }
 
@@ -61,6 +62,8 @@ export interface GoogleConfig {
   apiKey: string;
   /** USD per Text Search request (Enterprise SKU, before free usage). */
   pricePerRequest: number;
+  /** Hard cap on billed requests per mission. */
+  maxRequestsPerMission: number;
 }
 
 /** Google Places content may only be cached briefly; re-fetch or drop after this. */
@@ -166,8 +169,19 @@ async function discover(m: Mission, cfg: EffectiveConfig, p: Progress, deps: Dep
       st.status = "failed";
       continue;
     }
+    // share the limit across every source × segment × governorate
+    const quota = Math.ceil(m.params.limit / Math.max(1, Object.keys(p.pairs!).length));
+    const remaining = Math.min(quota, m.params.limit - (p.found ?? 0));
+    if (src === "google" && (p.google_requests ?? 0) >= deps.google!.maxRequestsPerMission) {
+      st.status = "failed";
+      if (!p.notified?.google_budget) {
+        p.notified = { ...p.notified, google_budget: true };
+        await ev("discover.google_budget", { requests: p.google_requests }, "info");
+      }
+      continue;
+    }
 
-    const res = src === "google" ? await searchGoogle(m, seg.discovery.searchTerms, gov, deps) : await searchOsm(seg.discovery.osm, gov, st.attempts, deps);
+    const res = src === "google" ? await searchGoogle(m, seg.discovery.searchTerms, gov, remaining, p, deps) : await searchOsm(seg.discovery.osm, gov, st.attempts, deps);
     if (!res.ok) {
       st.attempts++;
       if (res.config) {
@@ -186,9 +200,6 @@ async function discover(m: Mission, cfg: EffectiveConfig, p: Progress, deps: Dep
       continue;
     }
 
-    // share the limit across every source × segment × governorate
-    const quota = Math.ceil(m.params.limit / Math.max(1, Object.keys(p.pairs!).length));
-    const remaining = Math.min(quota, m.params.limit - (p.found ?? 0));
     const { inserted, duplicates } = await insertCompanies(deps.db, m, cfg, segKey, src, res.companies, remaining, deps.now?.() ?? new Date());
     st.status = "done";
     st.found = inserted;
@@ -216,16 +227,23 @@ async function searchOsm(osm: Parameters<typeof buildOverpassQuery>[1], gov: str
   return { ok: true, companies: parseOverpass(res.json, gov).map((c) => ({ ...c, social: socialLinksFromTags(c.tags) })) };
 }
 
-/** Every search term of the segment, up to three pages each; each request is billed and recorded. */
-async function searchGoogle(m: Mission, terms: Parameters<typeof buildPlacesQuery>[0][], gov: string, deps: Deps): Promise<SearchResult> {
+/**
+ * Search terms of the segment, paging only while more results are needed (want + margin for
+ * duplicates), within the mission's request budget. Each request is billed and recorded.
+ */
+async function searchGoogle(m: Mission, terms: Parameters<typeof buildPlacesQuery>[0][], gov: string, want: number, p: Progress, deps: Deps): Promise<SearchResult> {
   const g = deps.google!;
   const byRef = new Map<string, Found>();
+  // twice what this pair needs leaves room for duplicates; a page holds 20, so usually one request
+  const enough = Math.max(2 * want, want + 1);
   let requests = 0;
   try {
     for (const term of terms) {
+      if (byRef.size >= enough) break;
       let token: string | undefined;
       for (let page = 0; page < GOOGLE_MAX_PAGES; page++) {
-        if (Date.now() > deps.deadline - 50_000) break;
+        if (Date.now() > deps.deadline - 50_000 || byRef.size >= enough) break;
+        if ((p.google_requests ?? 0) + requests >= g.maxRequestsPerMission) break;
         const res = await runPlacesSearch(buildPlacesQuery(term, gov, token), g.apiKey, deps.fetch);
         requests++;
         if (!res.ok) {
@@ -240,6 +258,7 @@ async function searchGoogle(m: Mission, terms: Parameters<typeof buildPlacesQuer
       }
     }
   } finally {
+    p.google_requests = (p.google_requests ?? 0) + requests;
     if (requests)
       await deps.db.from("usage_events").insert({ tenant_id: m.tenant_id, kind: "discover.google_places", quantity: requests, cost_usd: Number((requests * g.pricePerRequest).toFixed(4)), metadata: { governorate: gov, mission_id: m.id } });
   }
