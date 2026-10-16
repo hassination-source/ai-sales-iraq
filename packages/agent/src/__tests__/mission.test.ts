@@ -35,7 +35,8 @@ function fakeFetch(opts: { overpass?: "ok" | "busy"; ai?: unknown } = {}) {
     if (url.startsWith("https://shatt-hotel.iq")) return new Response(siteHtml, { status: 200, headers: { "content-type": "text/html; charset=utf-8" } });
     if (url === "https://api.anthropic.com/v1/messages") {
       const body = JSON.parse(String(init?.body));
-      expect(body.tool_choice).toEqual({ type: "tool", name: "submit_draft" });
+      expect(body.tool_choice).toEqual({ type: "auto" });
+      expect(body.tools[0].name).toBe("submit_draft");
       expect(body.system).toContain("Never invent anything");
       return new Response(JSON.stringify(opts.ai ?? {
         content: [{ type: "tool_use", name: "submit_draft", input: { decision: "write", skip_reason: null, subject: "طاقة مستمرة لفندقكم", body: "مرحبا…", sources_used: [`kb:${"doc-1"}`, "website"], hypotheses: ["قد يعتمد الفندق على المولدات"] } }],

@@ -33,7 +33,8 @@ export async function writeDraft(req: DraftRequest, cfg: AiConfig, f: Fetch = fe
         system,
         messages: [{ role: "user", content: user }],
         tools: [DRAFT_TOOL],
-        tool_choice: { type: "tool", name: DRAFT_TOOL.name },
+        // newer models don't accept a forced tool; the prompt requires it and the output is validated either way
+        tool_choice: { type: "auto" },
       }),
       signal: AbortSignal.timeout(60_000),
     });
@@ -55,8 +56,23 @@ export async function writeDraft(req: DraftRequest, cfg: AiConfig, f: Fetch = fe
   const output = body.usage?.output_tokens ?? 0;
   const usage = { input, output, costUsd: estimateCostUsd(input, output, { input: cfg.priceIn, output: cfg.priceOut }) };
   const call = body.content?.find((c) => c.type === "tool_use" && c.name === DRAFT_TOOL.name);
-  if (!call) return { ok: false, error: "model did not return a draft", retryable: false, usage };
-  const checked = checkDraft(call.input, sourceIds);
+  // fallback: a JSON object answered as plain text
+  const text = body.content?.find((c) => c.type === "text") as { text?: string } | undefined;
+  const json = call?.input ?? parseJsonObject(text?.text);
+  if (!json) return { ok: false, error: "model did not return a draft", retryable: false, usage };
+  const checked = checkDraft(json, sourceIds);
   if (!checked.ok) return { ok: false, error: checked.reason, retryable: false, usage };
   return { ok: true, draft: checked.draft, sourceIds, usage };
+}
+
+function parseJsonObject(text: string | undefined): unknown {
+  if (!text) return null;
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  if (start < 0 || end <= start) return null;
+  try {
+    return JSON.parse(text.slice(start, end + 1));
+  } catch {
+    return null;
+  }
 }
