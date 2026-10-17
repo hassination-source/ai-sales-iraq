@@ -68,7 +68,7 @@ The product is an AI sales agent in the spirit of Selma, adapted to Iraq. The CR
 
 **Next**
 1. AI writing on (needs `ANTHROPIC_API_KEY` in Vercel) and a first knowledge base for Sigen.
-2. Email sending from a dedicated domain (Resend), follow-up sequences, reply classification, opt-out handling.
+2. ~~Email sending~~ built and live (17 Oct): approving a draft sends it via Resend from sales@sigensol.com as HTML (short links, signature block, per-line text direction) plus a text part; signed unsubscribe links with List-Unsubscribe one-click; per-tenant opt-out list respected by sending and drafting; test-email button in Settings. Still to build: follow-up sequences, reply capture/classification, a "rewrite draft" button.
 3. Meeting booking and handover to a salesperson; WhatsApp only for inbound / opted-in contacts.
 4. ~~Google Places source~~ built (17 Oct): searched first when `GOOGLE_PLACES_API_KEY` is set, Arabic text search per segment × governorate, up to 60 results per term; closed, out-of-governorate and home-like places dropped; deduped against OSM by record, name, phone, email and website; each request recorded in `usage_events`. Google content is marked to expire after 30 days (`attributes.google.expires_at`) — a refresh/purge job is still to do. Social links (Facebook, Instagram, …) collected from Google, OSM tags and company websites and shown on the lead page for manual contact; the agent never messages on Meta platforms.
 
