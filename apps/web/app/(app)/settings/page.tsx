@@ -3,7 +3,9 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 import { getContext } from "@/lib/tenant";
 import { supabaseServer } from "@/lib/supabase/server";
-import { integrationStatus } from "@/lib/supabase/service";
+import { integrationStatus, supabaseService } from "@/lib/supabase/service";
+import { composeEmailText, senderFor, sendViaResend, unsubscribeToken } from "@ais/agent";
+import { emailConfig } from "@/lib/email";
 import { getLang } from "@/lib/i18n";
 
 async function saveSettings(formData: FormData) {
@@ -28,7 +30,32 @@ async function saveSettings(formData: FormData) {
   redirect("/settings?saved=1");
 }
 
-export default async function SettingsPage({ searchParams }: { searchParams: Promise<{ error?: string; saved?: string }> }) {
+/** Sends a sample outreach email (with the saved signature) to the signed-in user, to check delivery end to end. */
+async function sendTestEmail() {
+  "use server";
+  const ctx = await getContext();
+  if (!["owner", "admin"].includes(ctx.role)) redirect("/settings?error=role");
+  const cfg = emailConfig();
+  const db = supabaseService();
+  if (!cfg || !db || !ctx.email) redirect("/settings?test=not_configured");
+  const { data: s } = await db.from("agent_settings").select("signature, from_email, draft_language").eq("tenant_id", ctx.tenant.id).maybeSingle();
+  const ar = (s?.draft_language ?? "ar-IQ").startsWith("ar");
+  const body = (ar
+    ? "هذه رسالة تجريبية من وكيل المبيعات للتأكد من أن الإرسال يعمل. الرسائل الحقيقية ستصل بهذا الشكل."
+    : "This is a test message from the sales agent to check that sending works. Real messages will arrive like this.") + (s?.signature ? `\n\n${s.signature}` : "");
+  const unsubscribeUrl = `${cfg.baseUrl.replace(/\/$/, "")}/u/${unsubscribeToken(cfg.secret, ctx.tenant.id, ctx.email)}`;
+  const res = await sendViaResend(cfg, {
+    from: senderFor(cfg.from, s?.from_email, ctx.tenant.name),
+    to: ctx.email,
+    subject: ar ? "رسالة تجريبية – وكيل المبيعات" : "Test message – sales agent",
+    text: composeEmailText(body, ar ? "ar" : "en", unsubscribeUrl),
+    unsubscribeUrl,
+    idempotencyKey: `test-${ctx.tenant.id}-${Date.now()}`,
+  });
+  redirect(res.ok ? `/settings?test=sent&to=${encodeURIComponent(ctx.email)}` : `/settings?test=failed&err=${encodeURIComponent(res.error)}`);
+}
+
+export default async function SettingsPage({ searchParams }: { searchParams: Promise<{ error?: string; saved?: string; test?: string; to?: string; err?: string }> }) {
   const sp = await searchParams;
   const ctx = await getContext();
   const lang = await getLang();
@@ -71,6 +98,9 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
     <div className="max-w-3xl space-y-8">
       <h1 className="text-2xl font-semibold">{ar ? "الإعدادات" : "Settings"}</h1>
       {sp.saved && <p className="note-info">{ar ? "تم الحفظ." : "Saved."}</p>}
+      {sp.test === "sent" && <p className="note-info">{ar ? `أُرسلت رسالة تجريبية إلى ${sp.to}. تحقق من البريد الوارد (والبريد غير المرغوب).` : `A test message was sent to ${sp.to}. Check your inbox (and spam).`}</p>}
+      {sp.test === "failed" && <p className="note-error">{ar ? "تعذّر الإرسال: " : "Sending failed: "}{sp.err}</p>}
+      {sp.test === "not_configured" && <p className="note-error">{ar ? "الإرسال غير مفعّل بعد: أضف RESEND_API_KEY في Vercel وأعد النشر." : "Sending isn't set up yet: add RESEND_API_KEY in Vercel and redeploy."}</p>}
       {sp.error && <p className="note-error">{sp.error === "role" ? (ar ? "فقط المالك أو المسؤول." : "Owner or admin only.") : sp.error === "invalid" ? (ar ? "تحقق من القيم." : "Check the values.") : sp.error}</p>}
 
       <section>
@@ -137,6 +167,11 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
                 <p className="font-medium">{r.name[ar ? 0 : 1]}</p>
                 <p className="text-muted">{r.what[ar ? 0 : 1]}</p>
                 {!r.ok && <p className="mt-1 text-xs text-muted">{r.how[ar ? 0 : 1]}</p>}
+                {r.name[1] === "Sending email & replies" && r.ok && canEdit && (
+                  <form action={sendTestEmail} className="mt-2">
+                    <button className="btn-quiet py-1 text-xs">{ar ? "أرسل رسالة تجريبية إلى بريدي" : "Send a test email to me"}</button>
+                  </form>
+                )}
               </div>
             </li>
           ))}
