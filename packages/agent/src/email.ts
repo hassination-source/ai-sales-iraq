@@ -36,15 +36,85 @@ export function verifyUnsubscribeToken(secret: string, token: string): { tenantI
   }
 }
 
-const FOOTER: Record<string, (url: string) => string> = {
-  ar: (url) => `—\nإذا لا ترغبون باستلام رسائل منا، اضغطوا هنا ولن نراسلكم مجدداً:\n${url}`,
-  en: (url) => `—\nIf you'd rather not hear from us, click here and we won't email you again:\n${url}`,
+const FOOTER_TEXT: Record<string, (url: string) => string> = {
+  ar: (url) => `—\nلإلغاء الاشتراك: ${url}`,
+  en: (url) => `—\nUnsubscribe: ${url}`,
 };
 
-/** The text the recipient gets: the approved body plus an unsubscribe line in the message language. */
+/** Plain-text part: the approved body plus a short unsubscribe line in the message language. */
 export function composeEmailText(body: string, language: string, unsubscribeUrl: string): string {
-  const footer = (language.startsWith("ar") ? FOOTER.ar : FOOTER.en)!(unsubscribeUrl);
+  const footer = (language.startsWith("ar") ? FOOTER_TEXT.ar : FOOTER_TEXT.en)!(unsubscribeUrl);
   return `${body.trimEnd()}\n\n${footer}`;
+}
+
+/** Split a fixed signature off the end of a draft body, so the HTML can lay it out as a signature block. */
+export function splitSignature(body: string, signature: string | null | undefined): { main: string; signature: string | null } {
+  const sig = signature?.trim();
+  const b = body.replace(/\r\n/g, "\n").trimEnd();
+  if (sig && b.endsWith(sig.replace(/\r\n/g, "\n"))) return { main: b.slice(0, b.length - sig.length).trimEnd(), signature: sig };
+  return { main: b, signature: null };
+}
+
+const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
+
+/**
+ * Escape a line and turn URLs, emails and phone numbers into links whose visible text is short
+ * ("sigensol.com", not "https://www.sigensol.com/"). Only http(s), mailto and tel links are produced.
+ */
+export function linkify(line: string): string {
+  const re = /(https?:\/\/[^\s|<>"']+|www\.[^\s|<>"']+\.[a-z]{2,}[^\s|<>"']*)|([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})|(\+\d[\d\s-]{7,}\d)/g;
+  let out = "";
+  let last = 0;
+  for (const m of line.matchAll(re)) {
+    out += esc(line.slice(last, m.index));
+    const [whole, url, email, phone] = m;
+    if (url) {
+      const href = url.startsWith("http") ? url : `https://${url}`;
+      const shown = url.replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/\/$/, "");
+      out += `<a href="${esc(href)}" style="color:#1f4e8c;text-decoration:none">${esc(shown)}</a>`;
+    } else if (email) out += `<a href="mailto:${esc(email)}" style="color:#1f4e8c;text-decoration:none">${esc(email)}</a>`;
+    else if (phone) out += `<a href="tel:${esc(phone.replace(/[\s-]/g, ""))}" style="color:#1f4e8c;text-decoration:none" dir="ltr">${esc(phone)}</a>`;
+    last = m.index! + whole.length;
+  }
+  return out + esc(line.slice(last));
+}
+
+/** Lines with any Arabic read right-to-left as a whole; Latin-only lines (addresses, links) left-to-right. */
+const lineDir = (l: string) => (/[\u0600-\u06FF]/.test(l) ? "rtl" : "ltr");
+
+const UNSUB_LABEL: Record<string, [string, string]> = {
+  ar: ["لا ترغبون باستلام رسائل منا؟", "إلغاء الاشتراك"],
+  en: ["Prefer not to hear from us?", "Unsubscribe"],
+};
+
+/**
+ * HTML part. Every line gets dir="auto" so Arabic and English lines each read in their own direction;
+ * the signature is laid out as a block (name bold, details smaller); the unsubscribe link is one short line.
+ */
+export function composeEmailHtml(body: string, signature: string | null, language: string, unsubscribeUrl: string): string {
+  const rtl = language.startsWith("ar");
+  const paras = body
+    .trim()
+    .split(/\n{2,}/)
+    .map((p) => `<p dir="${lineDir(p)}" style="margin:0 0 14px">${p.split("\n").map(linkify).join("<br>")}</p>`)
+    .join("");
+  const sigLines = (signature ?? "").split("\n").map((l) => l.trim()).filter(Boolean);
+  const sig = sigLines.length
+    ? `<div style="margin-top:22px;padding-top:14px;border-top:2px solid #e8b931">${sigLines
+        .map((l, i) =>
+          i === 0
+            ? `<div dir="${lineDir(l)}" style="font-weight:bold;font-size:15px;color:#1d2433">${linkify(l)}</div>`
+            : `<div dir="${lineDir(l)}" style="font-size:13px;color:${i === 1 ? "#1d2433" : "#5b6474"};margin-top:2px">${linkify(l)}</div>`,
+        )
+        .join("")}</div>`
+    : "";
+  const [q, a] = rtl ? UNSUB_LABEL.ar! : UNSUB_LABEL.en!;
+  return `<!doctype html><html lang="${rtl ? "ar" : "en"}" dir="${rtl ? "rtl" : "ltr"}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#ffffff">
+<div dir="${rtl ? "rtl" : "ltr"}" style="max-width:600px;padding:20px 16px;font-family:Tahoma,Arial,sans-serif;font-size:15px;line-height:1.7;color:#1d2433;text-align:${rtl ? "right" : "left"}">
+${paras}${sig}
+<p dir="${rtl ? "rtl" : "ltr"}" style="margin:28px 0 0;font-size:11px;color:#8a919c">${esc(q)} <a href="${esc(unsubscribeUrl)}" style="color:#8a919c">${esc(a)}</a></p>
+</div></body></html>`;
 }
 
 /** "Name <addr>" with the address swapped for the tenant's own sender address. */
@@ -58,7 +128,7 @@ export type SendResult = { ok: true; id: string } | { ok: false; retryable: bool
 
 export async function sendViaResend(
   cfg: Pick<EmailConfig, "apiKey">,
-  msg: { from: string; to: string; subject: string; text: string; unsubscribeUrl: string; idempotencyKey: string },
+  msg: { from: string; to: string; subject: string; text: string; html?: string; unsubscribeUrl: string; idempotencyKey: string },
   f: Fetch = fetch,
 ): Promise<SendResult> {
   try {
@@ -70,6 +140,7 @@ export async function sendViaResend(
         to: [msg.to],
         subject: msg.subject,
         text: msg.text,
+        ...(msg.html ? { html: msg.html } : {}),
         headers: { "List-Unsubscribe": `<${msg.unsubscribeUrl}>`, "List-Unsubscribe-Post": "List-Unsubscribe=One-Click" },
       }),
       signal: AbortSignal.timeout(15_000),
@@ -101,7 +172,7 @@ export async function sendApprovedDraft(db: Db, cfg: EmailConfig, tenantId: stri
 
   const [{ data: company }, { data: settings }, { data: tenant }] = await Promise.all([
     d.company_id ? db.from("companies").select("email, name").eq("id", d.company_id).eq("tenant_id", tenantId).maybeSingle() : { data: null },
-    db.from("agent_settings").select("from_email").eq("tenant_id", tenantId).maybeSingle(),
+    db.from("agent_settings").select("from_email, signature").eq("tenant_id", tenantId).maybeSingle(),
     db.from("tenants").select("name").eq("id", tenantId).single(),
   ]);
   const to = String(company?.email ?? "").trim().toLowerCase();
@@ -118,6 +189,10 @@ export async function sendApprovedDraft(db: Db, cfg: EmailConfig, tenantId: stri
       to,
       subject: d.subject ?? "",
       text: composeEmailText(d.body, d.language, unsubscribeUrl),
+      html: (() => {
+        const parts = splitSignature(d.body, settings?.signature);
+        return composeEmailHtml(parts.main, parts.signature, d.language, unsubscribeUrl);
+      })(),
       unsubscribeUrl,
       idempotencyKey: `draft-${d.id}`,
     },

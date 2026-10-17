@@ -4,7 +4,7 @@ import { z } from "zod";
 import { getContext } from "@/lib/tenant";
 import { supabaseServer } from "@/lib/supabase/server";
 import { integrationStatus, supabaseService } from "@/lib/supabase/service";
-import { composeEmailText, senderFor, sendViaResend, unsubscribeToken } from "@ais/agent";
+import { composeEmailHtml, composeEmailText, senderFor, sendViaResend, unsubscribeToken } from "@ais/agent";
 import { emailConfig } from "@/lib/email";
 import { getLang } from "@/lib/i18n";
 
@@ -40,15 +40,17 @@ async function sendTestEmail() {
   if (!cfg || !db || !ctx.email) redirect("/settings?test=not_configured");
   const { data: s } = await db.from("agent_settings").select("signature, from_email, draft_language").eq("tenant_id", ctx.tenant.id).maybeSingle();
   const ar = (s?.draft_language ?? "ar-IQ").startsWith("ar");
-  const body = (ar
+  const main = ar
     ? "هذه رسالة تجريبية من وكيل المبيعات للتأكد من أن الإرسال يعمل. الرسائل الحقيقية ستصل بهذا الشكل."
-    : "This is a test message from the sales agent to check that sending works. Real messages will arrive like this.") + (s?.signature ? `\n\n${s.signature}` : "");
+    : "This is a test message from the sales agent to check that sending works. Real messages will arrive like this.";
+  const body = main + (s?.signature ? `\n\n${s.signature}` : "");
   const unsubscribeUrl = `${cfg.baseUrl.replace(/\/$/, "")}/u/${unsubscribeToken(cfg.secret, ctx.tenant.id, ctx.email)}`;
   const res = await sendViaResend(cfg, {
     from: senderFor(cfg.from, s?.from_email, ctx.tenant.name),
     to: ctx.email,
     subject: ar ? "رسالة تجريبية – وكيل المبيعات" : "Test message – sales agent",
     text: composeEmailText(body, ar ? "ar" : "en", unsubscribeUrl),
+    html: composeEmailHtml(main, s?.signature ?? null, ar ? "ar" : "en", unsubscribeUrl),
     unsubscribeUrl,
     idempotencyKey: `test-${ctx.tenant.id}-${Date.now()}`,
   });

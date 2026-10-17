@@ -32,4 +32,4 @@ export async function tick(db: Db, ai: AiConfig | null, budgetMs = 240_000, f: t
   }
   return results;
 }
-export { composeEmailText, senderFor, sendApprovedDraft, sendViaResend, suppress, unsubscribeToken, verifyUnsubscribeToken, type EmailConfig, type SendOutcome } from "./email";
+export { composeEmailHtml, composeEmailText, linkify, senderFor, splitSignature, sendApprovedDraft, sendViaResend, suppress, unsubscribeToken, verifyUnsubscribeToken, type EmailConfig, type SendOutcome } from "./email";

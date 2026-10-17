@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { composeEmailText, sendApprovedDraft, senderFor, suppress, unsubscribeToken, verifyUnsubscribeToken } from "../email";
+import { composeEmailHtml, composeEmailText, linkify, sendApprovedDraft, senderFor, splitSignature, suppress, unsubscribeToken, verifyUnsubscribeToken } from "../email";
 import { FakeDb } from "./fake-db";
 
 const T = "tenant-1";
@@ -35,8 +35,8 @@ describe("unsubscribe links", () => {
   });
 
   it("footer follows the message language; sender uses the tenant's address", () => {
-    expect(composeEmailText("نص", "ar-IQ", "https://u")).toContain("لن نراسلكم مجدداً");
-    expect(composeEmailText("text", "en", "https://u")).toContain("won't email you again");
+    expect(composeEmailText("نص", "ar-IQ", "https://u")).toBe("نص\n\n—\nلإلغاء الاشتراك: https://u");
+    expect(composeEmailText("text", "en", "https://u")).toBe("text\n\n—\nUnsubscribe: https://u");
     expect(senderFor(cfg.from, null, "X")).toBe(cfg.from);
     expect(senderFor(cfg.from, "hassan@sigensol.com", 'Sigen "Solar"')).toBe("Sigen Solar <hassan@sigensol.com>");
   });
@@ -55,6 +55,7 @@ describe("sendApprovedDraft", () => {
     expect(body).toMatchObject({ from: cfg.from, to: ["info@baghdad-factory.com"], subject: "حلول الطاقة" });
     expect(String(body.text)).toMatch(/^السلام عليكم…\n\nم\. حسن\n\n—\n/);
     expect(String(body.text)).toContain("https://app.example/u/");
+    expect(String(body.html)).toContain("إلغاء الاشتراك");
     expect((body.headers as Record<string, string>)["List-Unsubscribe-Post"]).toBe("List-Unsubscribe=One-Click");
     expect(db.rows("message_drafts")[0]).toMatchObject({ status: "sent", to_email: "info@baghdad-factory.com", provider_message_id: "re_123" });
     expect(db.rows("activities").map((a) => a.type)).toEqual(["message.sent"]);
@@ -91,5 +92,30 @@ describe("sendApprovedDraft", () => {
     const busy = resend(503, {});
     expect(await sendApprovedDraft(db2, cfg, T, "d1", busy.f)).toMatchObject({ status: "failed", retryable: true });
     expect(db2.rows("message_drafts")[0]).toMatchObject({ status: "approved", send_error: "HTTP 503" });
+  });
+});
+
+describe("HTML email", () => {
+  it("shows short link text, keeps hrefs safe, links emails and phones", () => {
+    expect(linkify("www.sigensol.com | https://www.sigenergy.com/")).toBe(
+      '<a href="https://www.sigensol.com" style="color:#1f4e8c;text-decoration:none">sigensol.com</a> | <a href="https://www.sigenergy.com/" style="color:#1f4e8c;text-decoration:none">sigenergy.com</a>',
+    );
+    expect(linkify("+964 780 999 3770 | info@sigensol.com")).toContain('href="tel:+9647809993770"');
+    expect(linkify("info@sigensol.com")).toContain('href="mailto:info@sigensol.com"');
+    expect(linkify('<script>alert(1)</script> javascript:alert(1)')).not.toMatch(/<script|href="javascript/);
+  });
+
+  it("splits the fixed signature off the body and lays it out; the unsubscribe link is one short line", () => {
+    const sig = "م. حسن\nSigen Solar Energy\nwww.sigensol.com";
+    expect(splitSignature(`مرحبا\n\n${sig}\n`, sig)).toEqual({ main: "مرحبا", signature: sig });
+    expect(splitSignature("مرحبا", sig)).toEqual({ main: "مرحبا", signature: null });
+    const html = composeEmailHtml("السلام عليكم\n\nسطر ثاني", sig, "ar-IQ", "https://app/u/tok");
+    expect(html).toContain('dir="rtl"');
+    expect(html).toContain('<p dir="rtl" style="margin:0 0 14px">السلام عليكم</p>');
+    expect(html).toContain("font-weight:bold;font-size:15px;color:#1d2433\">م. حسن</div>");
+    expect(html).toContain('>sigensol.com</a>');
+    expect(html).toContain('<div dir="ltr" style="font-size:13px;color:#5b6474;margin-top:2px"><a href="https://www.sigensol.com"');
+    expect(html).toContain('<a href="https://app/u/tok" style="color:#8a919c">إلغاء الاشتراك</a>');
+    expect(html).not.toContain(">https://app/u/tok<");
   });
 });
