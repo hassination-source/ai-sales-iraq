@@ -3,7 +3,10 @@ import { getContext } from "@/lib/tenant";
 import { supabaseServer } from "@/lib/supabase/server";
 import { integrationStatus } from "@/lib/supabase/service";
 import { getLang, fmtDate } from "@/lib/i18n";
-import { reviewDraft, saveDraft, sendDraft } from "./actions";
+import { reviewDraft, rewriteDraft, saveDraft, sendDraft } from "./actions";
+
+// "Rewrite" calls the AI model inside the server action.
+export const maxDuration = 60;
 
 type Grounding = { sources?: string[]; hypotheses?: string[]; website?: string | null; directory?: string | null };
 
@@ -26,13 +29,14 @@ export default async function ApprovalsPage({ searchParams }: { searchParams: Pr
     approved: [emailReady ? "تمت الموافقة. ستُرسل الرسالة." : "تمت الموافقة. ستُرسل عند تفعيل إرسال البريد.", emailReady ? "Approved. The message will be sent." : "Approved. It will be sent once email sending is connected."],
     rejected: ["تم الرفض.", "Rejected."],
     saved: ["تم حفظ التعديلات.", "Changes saved."],
+    rewritten: ["كتب الوكيل نسخة جديدة. تجدها في آخر القائمة.", "The agent wrote a new version. You'll find it at the end of the list."],
   };
-  const errors: Record<string, [string, string]> = { invalid: ["العنوان والنص مطلوبان.", "Subject and text are required."], role: ["فقط المدير أو المسؤول يمكنه الموافقة.", "Only a manager or admin can approve."] };
+  const errors: Record<string, [string, string]> = { ai_off: ["الكتابة بالذكاء الاصطناعي غير مفعّلة.", "AI writing isn't switched on."], invalid: ["العنوان والنص مطلوبان.", "Subject and text are required."], role: ["فقط المدير أو المسؤول يمكنه الموافقة.", "Only a manager or admin can approve."] };
   const skipNotes: Record<string, [string, string]> = {
     no_email: ["لا يوجد بريد إلكتروني لهذه الشركة، لذلك لم تُرسل. تواصل معهم هاتفياً أو عبر واتساب.", "This company has no email address, so nothing was sent. Reach them by phone or WhatsApp."],
     suppressed: ["هذا العنوان طلب عدم مراسلته، لذلك لم تُرسل.", "This address asked not to be contacted, so nothing was sent."],
   };
-  const note = sp.sent ? "sent" : ["approved", "rejected", "saved"].find((k) => sp[k]);
+  const note = sp.sent ? "sent" : ["approved", "rejected", "saved", "rewritten"].find((k) => sp[k]);
   notes.sent = [`أُرسلت إلى ${sp.sent ?? ""}.`, `Sent to ${sp.sent ?? ""}.`];
 
   return (
@@ -105,6 +109,12 @@ export default async function ApprovalsPage({ searchParams }: { searchParams: Pr
                   <div className="flex flex-wrap items-center gap-3 pt-1">
                     {canReview && <button formAction={reviewDraft.bind(null, d.id, "approved")} className="btn-primary">{ar ? "موافقة" : "Approve"}</button>}
                     <button formAction={saveDraft.bind(null, d.id)} className="btn-quiet">{ar ? "حفظ التعديلات" : "Save changes"}</button>
+                    {canReview && (
+                      <span className="flex items-center gap-2">
+                        <input className="field w-56 py-1.5 text-sm" name="feedback" maxLength={500} placeholder={ar ? "ماذا تريد أن يتغير؟ (اختياري)" : "What should change? (optional)"} aria-label={ar ? "ملاحظات لإعادة الكتابة" : "Rewrite feedback"} />
+                        <button formAction={rewriteDraft.bind(null, d.id)} className="btn-quiet">{ar ? "أعد الكتابة" : "Rewrite"}</button>
+                      </span>
+                    )}
                     {canReview && (
                       <span className="ms-auto flex items-center gap-2">
                         <input className="field w-48 py-1.5 text-sm" name="reject_reason" placeholder={ar ? "سبب الرفض (اختياري)" : "Reason (optional)"} aria-label={ar ? "سبب الرفض" : "Reject reason"} />

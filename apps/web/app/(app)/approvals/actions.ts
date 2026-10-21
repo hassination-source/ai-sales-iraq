@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { getContext } from "@/lib/tenant";
-import { sendApprovedDraft, type SendOutcome } from "@ais/agent";
+import { rewriteDraft as agentRewrite, sendApprovedDraft, type SendOutcome } from "@ais/agent";
 import { supabaseServer } from "@/lib/supabase/server";
 import { supabaseService } from "@/lib/supabase/service";
 import { emailConfig } from "@/lib/email";
@@ -74,4 +74,23 @@ function sendOutcomeQuery(o: SendOutcome | null): string {
   if (o.status === "sent") return `sent=${encodeURIComponent(o.to)}`;
   if (o.status === "skipped") return `approved=1&skip=${o.reason}`;
   return `approved=1&send_error=${encodeURIComponent(o.error)}`;
+}
+
+/** Let the agent write the draft again with today's knowledge base and settings, plus optional feedback. */
+export async function rewriteDraft(draftId: string, formData: FormData) {
+  const ctx = await getContext();
+  if (!["owner", "admin", "manager"].includes(ctx.role)) back("error=role");
+  const db = supabaseService();
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!db || !apiKey) back("error=ai_off");
+  const ai = { apiKey: apiKey!, workspaceId: process.env.ANTHROPIC_WORKSPACE_ID || undefined, model: process.env.AI_MODEL ?? "claude-sonnet-5-5", priceIn: Number(process.env.AI_PRICE_IN ?? 3), priceOut: Number(process.env.AI_PRICE_OUT ?? 15) };
+  const feedback = String(formData.get("feedback") ?? "");
+  const r = await agentRewrite(db!, ai, ctx.tenant.id, draftId, feedback);
+  if (r.status === "failed") back(`error=${encodeURIComponent(r.error)}`);
+  if (r.status === "skipped") back(`error=${encodeURIComponent(r.reason || "skipped")}`);
+  // the old draft is closed by the signed-in reviewer, so the audit log shows who asked for the rewrite
+  const sb = await supabaseServer();
+  await sb.from("message_drafts").update({ status: "rejected", reject_reason: "Rewritten by the agent" }).eq("id", draftId).eq("tenant_id", ctx.tenant.id).eq("status", "pending_review");
+  revalidatePath("/approvals");
+  back("rewritten=1");
 }

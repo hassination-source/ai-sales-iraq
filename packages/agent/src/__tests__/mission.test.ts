@@ -368,3 +368,31 @@ describe("opt-outs", () => {
     expect(db.rows("message_drafts")).toHaveLength(0);
   });
 });
+
+describe("rewrite", () => {
+  it("writes a new pending draft with current knowledge and the reviewer's feedback", async () => {
+    const { rewriteDraft } = await import("../rewrite");
+    const { db } = setup();
+    db.tables.knowledge_docs = [{ id: "doc-1", tenant_id: T, title: "References", body: "Babylon Pharmaceutical, Hilla: 3 MW", status: "active", updated_at: "2" }];
+    db.tables.agent_settings = [{ tenant_id: T, draft_language: "ar-IQ", sender_name: "حسن", signature: "م. حسن\nwww.sigenergy.com" }];
+    db.tables.companies = [{ id: "c1", tenant_id: T, name: "مصنع بغداد", governorate: "IQ-BG", source_url: "https://maps.google.com/?cid=1", attributes: { segment: "factory", provider: "google", google: { address: "بغداد" } } }];
+    db.tables.message_drafts = [{ id: "old", tenant_id: T, company_id: "c1", status: "pending_review", language: "ar-IQ", subject: "x", body: "y" }];
+    let sent: { system: string; messages: { content: string }[] } | null = null;
+    const f = (async (_u: RequestInfo | URL, init?: RequestInit) => {
+      sent = JSON.parse(String(init?.body));
+      return new Response(JSON.stringify({ content: [{ type: "tool_use", name: "submit_draft", input: { decision: "write", skip_reason: null, subject: "جديد", body: "نص جديد", sources_used: ["kb:doc-1"], hypotheses: [] } }], usage: { input_tokens: 100, output_tokens: 50 } }), { status: 200 });
+    }) as typeof fetch;
+    const r = await rewriteDraft(db, ai, T, "old", "اذكر مشروع الحلة", f);
+    expect(r.status).toBe("rewritten");
+    expect(JSON.stringify(sent)).toContain("اذكر مشروع الحلة");
+    expect(JSON.stringify(sent)).toContain("Google Maps");
+    const fresh = db.rows("message_drafts").find((d) => d.id !== "old")!;
+    expect(fresh).toMatchObject({ subject: "جديد", body: "نص جديد\n\nم. حسن\nwww.sigenergy.com", company_id: "c1" });
+    expect(fresh.grounding).toMatchObject({ rewrite_of: "old" });
+    expect(db.rows("usage_events")).toHaveLength(1);
+
+    // an already reviewed draft can't be rewritten
+    db.tables.message_drafts[0]!.status = "approved";
+    expect((await rewriteDraft(db, ai, T, "old", "", f)).status).toBe("failed");
+  });
+});

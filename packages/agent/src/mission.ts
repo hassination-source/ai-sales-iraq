@@ -128,7 +128,7 @@ export async function runMission(m: Mission, deps: Deps): Promise<void> {
   await save({ status: "done", phase: "finished", finished_at: new Date().toISOString(), locked_until: null });
 }
 
-async function loadConfig(db: Db, tenantId: string): Promise<EffectiveConfig | null> {
+export async function loadConfig(db: Db, tenantId: string): Promise<EffectiveConfig | null> {
   const { data } = await db.from("industry_configs").select("pack_id, pack_version, overrides").eq("tenant_id", tenantId).single();
   if (!data) return null;
   try {
@@ -525,7 +525,7 @@ async function draft(m: Mission, cfg: EffectiveConfig, p: Progress, deps: Deps, 
 }
 
 /** What the directory listing says about the company, labelled with the directory it came from. */
-function directoryFacts(url: string, attributes: Record<string, unknown> | null) {
+export function directoryFacts(url: string, attributes: Record<string, unknown> | null) {
   const google = attributes?.provider === "google";
   const raw = (google ? attributes?.google : attributes?.osm) as Record<string, unknown> | undefined;
   const facts = Object.fromEntries(Object.entries(raw ?? {}).filter(([k]) => k !== "expires_at").map(([k, v]) => [k, String(v)]));
