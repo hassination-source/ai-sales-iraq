@@ -75,6 +75,12 @@ export function describeEvent(e: AgentEvent, lang: Lang, segmentLabel: (key: str
       return ar ? `رفضت مسودة لـ${d.name} لأنها لم تلتزم بالمصادر المعتمدة` : `Discarded a draft for ${d.name}: it didn't stick to approved sources`;
     case "draft.daily_limit":
       return ar ? `وصلت للحد اليومي (${n(d.limit, lang)} رسالة). سأكمل غداً` : `Reached today's limit (${d.limit} messages). I'll continue tomorrow`;
+    case "leads.claimed":
+      return Number(d.count)
+        ? ar ? `أخذت ${n(d.count, lang)} شركة من قائمتك المستوردة` : `Took ${d.count} companies from your imported list`
+        : ar ? "لا توجد شركات مطابقة في قائمتك المستوردة (بالمحافظة والنوع المختارين، ولديها بريد)" : "No matching companies in your imported list (for the chosen governorates and types, with an email)";
+    case "draft.rewritten":
+      return ar ? `أعدت كتابة الرسالة إلى ${d.name}: بانتظار موافقتك` : `Rewrote the message to ${d.name}: waiting for your approval`;
     case "email.sent":
       return ar ? `أرسلت الرسالة إلى ${d.name} (${d.to})` : `Sent the message to ${d.name} (${d.to})`;
     case "email.failed":

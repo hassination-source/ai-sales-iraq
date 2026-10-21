@@ -21,7 +21,7 @@ export async function rewriteDraft(db: Db, ai: AiConfig, tenantId: string, draft
 
   const [cfg, { data: c }, { data: r }, { data: docs }, { data: settings }, { data: tenant }] = await Promise.all([
     loadConfig(db, tenantId),
-    db.from("companies").select("id, name, governorate, source_url, attributes").eq("id", old.company_id).eq("tenant_id", tenantId).maybeSingle(),
+    db.from("companies").select("id, name, governorate, source_url, source_type, industry, description, attributes").eq("id", old.company_id).eq("tenant_id", tenantId).maybeSingle(),
     db.from("company_research").select("url, status, title, description, text, emails, phones, language").eq("company_id", old.company_id).eq("tenant_id", tenantId).maybeSingle(),
     db.from("knowledge_docs").select("id, title, body").eq("tenant_id", tenantId).eq("status", "active").order("updated_at", { ascending: false }).limit(12),
     db.from("agent_settings").select("draft_language, sender_name, signature").eq("tenant_id", tenantId).maybeSingle(),
@@ -51,7 +51,7 @@ export async function rewriteDraft(db: Db, ai: AiConfig, tenantId: string, draft
         name: c.name,
         governorate: c.governorate,
         segmentLabel: seg ? t(seg.label, "en") : null,
-        directory: c.source_url ? directoryFacts(c.source_url, c.attributes) : null,
+        directory: directoryFacts(c),
         website: research?.status === "ok" ? { url: research.url, title: research.title, description: research.description, text: research.text ?? "", emails: research.emails, phones: research.phones, language: research.language } : null,
       },
     },

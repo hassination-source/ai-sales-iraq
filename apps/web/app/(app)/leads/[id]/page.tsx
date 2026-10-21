@@ -1,3 +1,4 @@
+import { whatsappLink } from "@/lib/whatsapp";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { GOVERNORATES, scoreCompany, t as tx } from "@ais/core";
@@ -101,6 +102,12 @@ export default async function LeadPage({ params, searchParams }: { params: Promi
                 <p className="mt-2 text-sm text-muted">{ar ? "تعذّر فتح الموقع" : "The website couldn't be opened"} ({research.error})</p>
               )}
             </div>
+          )}
+
+          {whatsappLink(c.phone) && (
+            <p className="mt-4">
+              <a href={whatsappLink(c.phone)!} target="_blank" rel="noreferrer" className="btn-quiet">{ar ? "مراسلة عبر واتساب" : "Message on WhatsApp"}</a>
+            </p>
           )}
 
           {socialLinks(c.attributes).length > 0 && (

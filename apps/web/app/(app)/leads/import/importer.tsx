@@ -2,7 +2,18 @@
 
 import { useState, useTransition } from "react";
 import Link from "next/link";
+import { parseCsv } from "@ais/core";
 import { importLeads, previewImport, type Preview } from "./actions";
+
+/** Read CSV or Excel in the browser into rows of text; the server only ever sees plain cell values. */
+async function readRows(f: File): Promise<string[][]> {
+  if (/\.xlsx$/i.test(f.name)) {
+    const { default: readXlsxFile } = await import("read-excel-file");
+    const rows = await readXlsxFile(f);
+    return rows.map((r) => r.map((c) => (c === null || c === undefined ? "" : c instanceof Date ? c.toISOString().slice(0, 10) : String(c))));
+  }
+  return parseCsv(await f.text());
+}
 
 type Lang = "ar" | "en";
 type Gov = { code: string; ar: string; en: string };
@@ -10,6 +21,8 @@ type Gov = { code: string; ar: string; en: string };
 const MESSAGES: Record<string, { ar: string; en: string }> = {
   file_too_large: { ar: "الملف أكبر من 5 ميغابايت.", en: "The file is larger than 5 MB." },
   too_many_rows: { ar: "الملف يحتوي أكثر من 5000 صف. قسّمه إلى ملفات أصغر.", en: "The file has more than 5,000 rows. Split it into smaller files." },
+  unreadable: { ar: "تعذّرت قراءة الملف. جرّب حفظه بصيغة xlsx أو CSV (UTF-8).", en: "Couldn't read the file. Try saving it as .xlsx or CSV (UTF-8)." },
+  old_excel: { ar: "صيغة xls القديمة غير مدعومة. احفظ الملف بصيغة xlsx.", en: "The old .xls format isn't supported. Save the file as .xlsx." },
 };
 /** Arabic versions of the import checker's messages; English passes through unchanged. */
 function localize(msg: string, lang: Lang): string {
@@ -36,7 +49,8 @@ const ON: Record<string, { ar: string; en: string }> = {
 
 export function Importer({ lang, governorates }: { lang: Lang; governorates: Gov[] }) {
   const ar = lang === "ar";
-  const [file, setFile] = useState<{ name: string; text: string } | null>(null);
+  const [file, setFile] = useState<{ name: string; rows: string[][] } | null>(null);
+  const [gov, setGov] = useState<string>("");
   const [preview, setPreview] = useState<Preview | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [done, setDone] = useState<number | null>(null);
@@ -50,11 +64,16 @@ export function Importer({ lang, governorates }: { lang: Lang; governorates: Gov
   async function onFile(f: File | undefined) {
     setPreview(null); setMessage(null); setDone(null);
     if (!f) return;
-    if (/\.xlsx?$/i.test(f.name)) { setMessage(ar ? "احفظ ملف Excel بصيغة CSV (UTF-8) ثم ارفعه." : "Save the Excel file as CSV (UTF-8), then upload it."); return; }
-    const text = await f.text();
-    setFile({ name: f.name, text });
+    if (/\.xls$/i.test(f.name)) { say("old_excel"); return; }
+    let rows: string[][];
+    try { rows = await readRows(f); } catch { say("unreadable"); return; }
+    setFile({ name: f.name, rows });
+    check(rows, gov);
+  }
+
+  function check(rows: string[][], g: string) {
     start(async () => {
-      const r = await previewImport(text);
+      const r = await previewImport(rows, g || null);
       if (r.ok) setPreview(r); else say(r.message);
     });
   }
@@ -62,7 +81,7 @@ export function Importer({ lang, governorates }: { lang: Lang; governorates: Gov
   function onImport() {
     if (!file) return;
     start(async () => {
-      const r = await importLeads(file.text, file.name);
+      const r = await importLeads(file.rows, file.name, gov || null);
       if (r.ok) { setDone(r.imported); setPreview(null); } else say(r.message);
     });
   }
@@ -70,12 +89,25 @@ export function Importer({ lang, governorates }: { lang: Lang; governorates: Gov
   return (
     <div className="space-y-6">
       <label className="block cursor-pointer rounded-lg border-2 border-dashed border-line bg-surface p-8 text-center hover:border-lapis">
-        <span className="block font-medium">{file ? file.name : ar ? "اختر ملف CSV" : "Choose a CSV file"}</span>
+        <span className="block font-medium">{file ? file.name : ar ? "اختر ملف Excel أو CSV" : "Choose an Excel or CSV file"}</span>
         <span className="mt-1 block text-sm text-muted">
-          {ar ? "الأعمدة المعروفة: اسم الشركة، المحافظة، الهاتف، الموقع، البريد، الشخص المسؤول — بالعربي أو الإنكليزي." : "Recognised columns: company name, governorate, phone, website, email, contact — in Arabic or English."}
+          {ar ? "الأعمدة المعروفة: اسم الشركة، الفئة، المحافظة، الهاتف، الموقع، البريد، الشخص المسؤول — بالعربي أو الإنكليزي أو السويدي." : "Recognised columns: company name, category, governorate, phone, website, email, contact — in Arabic, English or Swedish."}
         </span>
-        <input type="file" accept=".csv,text/csv,.xlsx,.xls" className="sr-only" onChange={(e) => onFile(e.target.files?.[0])} />
+        <input type="file" accept=".csv,text/csv,.xlsx" className="sr-only" onChange={(e) => onFile(e.target.files?.[0])} />
       </label>
+
+      <div className="max-w-sm">
+        <label className="label" htmlFor="default-gov">{ar ? "المحافظة إن لم تُذكر في الملف" : "Governorate when the file doesn't say"}</label>
+        <select
+          id="default-gov"
+          className="field"
+          value={gov}
+          onChange={(e) => { setGov(e.target.value); if (file) check(file.rows, e.target.value); }}
+        >
+          <option value="">{ar ? "— غير محددة —" : "— not set —"}</option>
+          {governorates.map((g) => <option key={g.code} value={g.code}>{ar ? g.ar : g.en}</option>)}
+        </select>
+      </div>
 
       {pending && <p className="note-info">{ar ? "جارٍ الفحص…" : "Checking…"}</p>}
       {message && <p className="note-error">{message}</p>}

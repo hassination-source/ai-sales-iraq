@@ -4,6 +4,7 @@ import { supabaseServer } from "@/lib/supabase/server";
 import { integrationStatus } from "@/lib/supabase/service";
 import { getLang, fmtDate } from "@/lib/i18n";
 import { reviewDraft, rewriteDraft, saveDraft, sendDraft } from "./actions";
+import { whatsappLink } from "@/lib/whatsapp";
 
 // "Rewrite" calls the AI model inside the server action.
 export const maxDuration = 60;
@@ -17,10 +18,11 @@ export default async function ApprovalsPage({ searchParams }: { searchParams: Pr
   const ar = lang === "ar";
   const sb = await supabaseServer();
   const [{ data: drafts }, { data: docs }, { data: recent }] = await Promise.all([
-    sb.from("message_drafts").select("id, subject, body, language, channel, grounding, generated_by, edited, created_at, company:companies(id, name, email, governorate)").eq("tenant_id", ctx.tenant.id).eq("status", "pending_review").order("created_at").limit(30),
+    sb.from("message_drafts").select("id, subject, body, language, channel, grounding, generated_by, edited, created_at, company:companies(id, name, email, phone, governorate)").eq("tenant_id", ctx.tenant.id).eq("status", "pending_review").order("created_at").limit(30),
     sb.from("knowledge_docs").select("id, title").eq("tenant_id", ctx.tenant.id),
     sb.from("message_drafts").select("id, status, subject, reviewed_at, to_email, sent_at, send_error, company:companies(name, email)").eq("tenant_id", ctx.tenant.id).in("status", ["approved", "rejected", "sent", "failed"]).order("reviewed_at", { ascending: false }).limit(15),
   ]);
+  const { data: agentSettings } = await sb.from("agent_settings").select("signature").eq("tenant_id", ctx.tenant.id).maybeSingle();
   const docTitle = new Map((docs ?? []).map((d) => [`kb:${d.id}`, d.title]));
   const canReview = ["owner", "admin", "manager"].includes(ctx.role);
   const emailReady = integrationStatus().email;
@@ -61,7 +63,8 @@ export default async function ApprovalsPage({ searchParams }: { searchParams: Pr
       ) : (
         <ul className="space-y-6">
           {drafts!.map((d) => {
-            const c = d.company as unknown as { id: string; name: string; email: string | null } | null;
+            const c = d.company as unknown as { id: string; name: string; email: string | null; phone: string | null } | null;
+            const wa = whatsappLink(c?.phone, d.body, agentSettings?.signature);
             const g = (d.grounding ?? {}) as Grounding;
             const rtl = d.language.startsWith("ar");
             return (
@@ -70,6 +73,7 @@ export default async function ApprovalsPage({ searchParams }: { searchParams: Pr
                   <p>
                     <Link href={c ? `/leads/${c.id}` : "#"} className="font-medium hover:text-lapis">{c?.name}</Link>
                     {c?.email && <span className="ms-2 text-sm text-muted" dir="ltr">{c.email}</span>}
+                    {c?.phone && <span className="ms-2 text-sm text-muted" dir="ltr">{c.phone}</span>}
                   </p>
                   <p className="text-xs text-muted">{ar ? "كتبها الوكيل" : "Written by the agent"}, {fmtDate(lang, d.created_at)}{d.edited ? (ar ? "، معدّلة" : ", edited") : ""}</p>
                 </div>
@@ -109,6 +113,11 @@ export default async function ApprovalsPage({ searchParams }: { searchParams: Pr
                   <div className="flex flex-wrap items-center gap-3 pt-1">
                     {canReview && <button formAction={reviewDraft.bind(null, d.id, "approved")} className="btn-primary">{ar ? "موافقة" : "Approve"}</button>}
                     <button formAction={saveDraft.bind(null, d.id)} className="btn-quiet">{ar ? "حفظ التعديلات" : "Save changes"}</button>
+                    {wa && (
+                      <a href={wa} target="_blank" rel="noreferrer" className="btn-quiet" title={ar ? "يفتح واتساب والرسالة جاهزة؛ احفظ تعديلاتك أولاً" : "Opens WhatsApp with the message filled in; save your edits first"}>
+                        {ar ? "واتساب" : "WhatsApp"}
+                      </a>
+                    )}
                     {canReview && (
                       <span className="flex items-center gap-2">
                         <input className="field w-56 py-1.5 text-sm" name="feedback" maxLength={500} placeholder={ar ? "ماذا تريد أن يتغير؟ (اختياري)" : "What should change? (optional)"} aria-label={ar ? "ملاحظات لإعادة الكتابة" : "Rewrite feedback"} />

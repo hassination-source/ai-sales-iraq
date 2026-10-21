@@ -79,22 +79,46 @@ const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 
 /* ---------------------------------------------------------------- column mapping */
 
-export type ImportField = "name" | "industry" | "governorate" | "city" | "district" | "website" | "phone" | "email" | "description" | "contact_name" | "contact_title";
+export type ImportField = "name" | "name_alt" | "industry" | "governorate" | "city" | "district" | "website" | "phone" | "email" | "description" | "contact_name" | "contact_title" | "source_url";
 
-/** Header aliases (Arabic + English) recognised automatically. */
+/** Header aliases (Arabic, English, Swedish) recognised automatically. */
 const HEADER_ALIASES: Record<ImportField, string[]> = {
-  name: ["name", "company", "company name", "business", "اسم الشركة", "الشركة", "الاسم", "اسم المنشأة"],
-  industry: ["industry", "sector", "category", "القطاع", "النشاط", "الصنف"],
-  governorate: ["governorate", "province", "state", "المحافظة", "المحافظه"],
-  city: ["city", "المدينة", "المدينه"],
-  district: ["district", "area", "القضاء", "المنطقة", "المنطقه", "الحي"],
-  website: ["website", "web", "url", "site", "الموقع", "الموقع الالكتروني"],
-  phone: ["phone", "mobile", "tel", "telephone", "whatsapp", "الهاتف", "رقم الهاتف", "الموبايل", "واتساب"],
-  email: ["email", "e-mail", "mail", "البريد", "البريد الالكتروني", "الايميل"],
-  description: ["description", "notes", "about", "الوصف", "ملاحظات"],
-  contact_name: ["contact", "contact name", "contact person", "الشخص المسؤول", "اسم المسؤول"],
-  contact_title: ["title", "job title", "position", "المنصب", "الوظيفة"],
+  name: ["name", "company", "company name", "business", "اسم الشركة", "الشركة", "الاسم", "اسم المنشأة", "företag", "företagsnamn", "namn"],
+  name_alt: ["arabic name", "name ar", "name (ar)", "الاسم بالعربي", "الاسم العربي", "arabiskt namn"],
+  industry: ["industry", "sector", "category", "القطاع", "النشاط", "الصنف", "kategori", "bransch"],
+  governorate: ["governorate", "province", "state", "المحافظة", "المحافظه", "guvernement", "provins"],
+  city: ["city", "المدينة", "المدينه", "stad", "ort"],
+  district: ["district", "area", "القضاء", "المنطقة", "المنطقه", "الحي", "område"],
+  website: ["website", "web", "url", "site", "الموقع", "الموقع الالكتروني", "webbplats", "hemsida"],
+  phone: ["phone", "phones", "mobile", "tel", "telephone", "whatsapp", "الهاتف", "رقم الهاتف", "الموبايل", "واتساب", "telefon", "mobil"],
+  email: ["email", "e-mail", "mail", "البريد", "البريد الالكتروني", "الايميل", "e-post", "epost", "mejl", "mejladress"],
+  description: ["description", "notes", "about", "address", "الوصف", "ملاحظات", "العنوان", "beskrivning", "adress", "adress / verksamhet", "verksamhet"],
+  contact_name: ["contact", "contact name", "contact person", "الشخص المسؤول", "اسم المسؤول", "kontaktperson"],
+  contact_title: ["title", "job title", "position", "المنصب", "الوظيفة", "titel", "befattning"],
+  source_url: ["source", "source url", "المصدر", "källa", "källa (url)", "källa url"],
 };
+
+/** Many exported lists start with a title block: the header is the first row that names a company column. */
+export function findHeaderRow(rows: string[][], maxScan = 30): number {
+  for (let i = 0; i < Math.min(rows.length, maxScan); i++) if (detectColumns(rows[i] ?? []).name !== undefined) return i;
+  return 0;
+}
+
+/** Split a cell holding several values ("a@x.iq; b@y.iq", "+964770… / +964780…"). */
+export function splitMulti(v: string | null): string[] {
+  return (v ?? "").split(/[;,\n|]|\s\/\s/).map((x) => x.trim()).filter(Boolean);
+}
+
+/**
+ * Segment whose import keywords start a word in a category/industry value ("Elmaterial" matches
+ * "elmaterial", "Hotell" doesn't match "el"). Prefix matching handles Swedish compounds and plurals.
+ */
+export function matchSegment(segments: { key: string; discovery: { importKeywords: string[] } }[], industry: string | null): string | null {
+  if (!industry) return null;
+  const n = ` ${normalizeArabic(industry)}`;
+  for (const s of segments) if (s.discovery.importKeywords.some((k) => n.includes(` ${normalizeArabic(k)}`))) return s.key;
+  return null;
+}
 
 export function detectColumns(header: string[]): Partial<Record<ImportField, number>> {
   const map: Partial<Record<ImportField, number>> = {};
@@ -113,6 +137,8 @@ export interface NormalizedLead {
   row: number; // 1-based row in the file (header = 1)
   name: string;
   name_normalized: string;
+  /** Second-language name from the file (e.g. the Arabic name next to an English one) */
+  name_alt: string | null;
   industry: string | null;
   governorate: string | null;
   governorate_raw: string | null;
@@ -124,6 +150,11 @@ export interface NormalizedLead {
   description: string | null;
   contact_name: string | null;
   contact_title: string | null;
+  /** Further phones and emails listed in the same cell */
+  extra_phones: string[];
+  extra_emails: string[];
+  /** Where the row's data came from, when the file says (http(s) only) */
+  source_url: string | null;
   /** Imported data is never treated as verified */
   verification_status: "unverified";
   warnings: string[];
@@ -144,8 +175,14 @@ export interface ImportResult {
   columns: Partial<Record<ImportField, number>>;
 }
 
-export function prepareImport(rows: string[][], existing: ExistingCompanyKey[] = [], columns?: Partial<Record<ImportField, number>>): ImportResult {
-  const [header, ...body] = rows;
+export interface ImportOptions {
+  /** Used when the file has no governorate (or it's empty), e.g. a list of Baghdad companies */
+  defaultGovernorate?: string | null;
+}
+
+export function prepareImport(allRows: string[][], existing: ExistingCompanyKey[] = [], columns?: Partial<Record<ImportField, number>>, opts: ImportOptions = {}): ImportResult {
+  const headerAt = columns ? 0 : findHeaderRow(allRows);
+  const [header, ...body] = allRows.slice(headerAt);
   const result: ImportResult = { ready: [], duplicates: [], errors: [], columns: {} };
   if (!header) {
     result.errors.push({ row: 0, message: "file is empty" });
@@ -173,7 +210,8 @@ export function prepareImport(rows: string[][], existing: ExistingCompanyKey[] =
   const fileNameGov: Index = new Map(), filePhone: Index = new Map(), fileSite: Index = new Map();
 
   body.forEach((r, idx) => {
-    const rowNo = idx + 2;
+    if (r.every((c) => !String(c ?? "").trim())) return; // blank line
+    const rowNo = headerAt + idx + 2;
     const name = get(r, "name");
     if (!name) {
       result.errors.push({ row: rowNo, message: "missing company name" });
@@ -181,22 +219,26 @@ export function prepareImport(rows: string[][], existing: ExistingCompanyKey[] =
     }
     const warnings: string[] = [];
     const govRaw = get(r, "governorate") ?? get(r, "city");
-    const governorate = matchGovernorate(govRaw);
+    const governorate = matchGovernorate(govRaw) ?? (opts.defaultGovernorate && (!govRaw || !get(r, "governorate")) ? opts.defaultGovernorate : null);
     if (govRaw && !governorate) warnings.push(`governorate "${govRaw}" not recognised`);
     const phoneRaw = get(r, "phone");
-    const phone = normalizeIraqiPhone(phoneRaw);
+    const phones = [...new Set(splitMulti(phoneRaw).map((x) => normalizeIraqiPhone(x)).filter((x): x is string => !!x))];
+    const phone = phones[0] ?? null;
     if (phoneRaw && !phone) warnings.push(`phone "${phoneRaw}" is not a valid Iraqi number`);
     const siteRaw = get(r, "website");
     const website = normalizeWebsite(siteRaw);
     if (siteRaw && !website) warnings.push(`website "${siteRaw}" is not a valid URL`);
     const emailRaw = get(r, "email");
-    const email = emailRaw && EMAIL.test(emailRaw) ? emailRaw.toLowerCase() : null;
+    const emails = [...new Set(splitMulti(emailRaw).map((x) => x.toLowerCase()).filter((x) => EMAIL.test(x)))];
+    const email = emails[0] ?? null;
     if (emailRaw && !email) warnings.push(`email "${emailRaw}" is not valid`);
+    const srcRaw = get(r, "source_url");
 
     const lead: NormalizedLead = {
       row: rowNo,
       name,
       name_normalized: normalizeCompanyName(name),
+      name_alt: get(r, "name_alt"),
       industry: get(r, "industry"),
       governorate,
       governorate_raw: govRaw,
@@ -208,6 +250,9 @@ export function prepareImport(rows: string[][], existing: ExistingCompanyKey[] =
       description: get(r, "description"),
       contact_name: get(r, "contact_name"),
       contact_title: get(r, "contact_title"),
+      extra_phones: phones.slice(1, 6),
+      extra_emails: emails.slice(1, 6),
+      source_url: srcRaw && /^https?:\/\/[^\s]+$/i.test(srcRaw) ? srcRaw.slice(0, 1000) : null,
       verification_status: "unverified",
       warnings,
     };

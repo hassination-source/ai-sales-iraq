@@ -1,4 +1,5 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
+import { resolveMx } from "node:dns/promises";
 import type { Fetch } from "./http";
 import type { Db } from "./mission";
 import { redactSecrets } from "./ai";
@@ -161,11 +162,23 @@ export type SendOutcome =
 
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[a-z]{2,}$/i;
 
+/** Does the domain accept mail at all? Old lists contain dead domains; every bounce hurts the sender's reputation. */
+export type DomainCheck = (domain: string) => Promise<boolean>;
+export const hasMailServer: DomainCheck = async (domain) => {
+  try {
+    const mx = await Promise.race([resolveMx(domain), new Promise<never>((_, no) => setTimeout(() => no(new Error("timeout")), 5000))]);
+    return mx.some((r) => r.exchange && r.exchange !== ".");
+  } catch (e) {
+    // NXDOMAIN / no records: no mail server. A timeout is not proof either way: let it through.
+    return e instanceof Error && e.message === "timeout";
+  }
+};
+
 /**
  * Send one approved draft. `db` is a service-role client: every query is scoped to `tenantId`.
  * Idempotent: Resend dedupes on the draft id, and the status only moves approved → sent/failed.
  */
-export async function sendApprovedDraft(db: Db, cfg: EmailConfig, tenantId: string, draftId: string, f: Fetch = fetch): Promise<SendOutcome> {
+export async function sendApprovedDraft(db: Db, cfg: EmailConfig, tenantId: string, draftId: string, f: Fetch = fetch, checkDomain: DomainCheck = hasMailServer): Promise<SendOutcome> {
   const { data: d } = await db.from("message_drafts").select("id, status, channel, subject, body, language, company_id").eq("id", draftId).eq("tenant_id", tenantId).maybeSingle();
   if (!d || d.status !== "approved") return { status: "skipped", reason: "not_approved" };
   if (d.channel !== "email") return { status: "skipped", reason: "not_email" };
@@ -180,6 +193,13 @@ export async function sendApprovedDraft(db: Db, cfg: EmailConfig, tenantId: stri
 
   const { data: suppressed } = await db.from("email_suppressions").select("email").eq("tenant_id", tenantId).eq("email", to).maybeSingle();
   if (suppressed) return { status: "skipped", reason: "suppressed" };
+
+  if (!(await checkDomain(to.split("@")[1]!))) {
+    const error = `${to.split("@")[1]} does not receive email (no mail server)`;
+    await db.from("message_drafts").update({ status: "failed", to_email: to, send_error: error }).eq("id", d.id).eq("tenant_id", tenantId).eq("status", "approved");
+    await db.from("agent_events").insert({ tenant_id: tenantId, type: "email.failed", level: "error", data: { name: company?.name, error, retryable: false }, company_id: d.company_id, draft_id: d.id });
+    return { status: "failed", error, retryable: false };
+  }
 
   const unsubscribeUrl = `${cfg.baseUrl.replace(/\/$/, "")}/u/${unsubscribeToken(cfg.secret, tenantId, to)}`;
   const res = await sendViaResend(

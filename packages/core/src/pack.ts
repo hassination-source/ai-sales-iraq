@@ -66,6 +66,8 @@ export const Segment = z
         osm: z.array(z.array(OsmTagFilter).min(1)).default([]),
         /** free-text searches for providers like Google Places */
         searchTerms: z.array(LocalizedText).default([]),
+        /** Words in an imported list's category/industry column that place a company in this segment (any language) */
+        importKeywords: z.array(z.string().min(2)).default([]),
       })
       .strict()
       .default({}),

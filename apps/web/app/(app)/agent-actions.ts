@@ -25,16 +25,21 @@ export async function loadEvents(afterId: number): Promise<AgentEvent[]> {
 export async function startMission(formData: FormData) {
   const ctx = await getContext();
   if (!["owner", "admin", "manager"].includes(ctx.role)) redirect("/?error=role");
-  const segmentKeys = ctx.config.segments.map((s) => s.key) as [string, ...string[]];
+  const segmentKeys: [string, ...string[]] = ["_other", ...ctx.config.segments.map((s) => s.key)];
+  const source = formData.get("source") === "leads" ? "leads" : "discover";
+  // "_other" (uncategorised) only means something for imported lists
+  const segments = formData.getAll("segments").filter((v) => source === "leads" || v !== "_other");
   const parsed = z
     .object({
+      source: z.enum(["discover", "leads"]),
       segments: z.array(z.enum(segmentKeys)).min(1).max(10),
       governorates: z.array(z.enum(GOVERNORATES.map((g) => g.code) as [string, ...string[]])).min(1).max(19),
       limit: z.coerce.number().int().min(5).max(200),
       write_drafts: z.boolean(),
     })
     .safeParse({
-      segments: formData.getAll("segments"),
+      source,
+      segments,
       governorates: formData.getAll("governorates"),
       limit: formData.get("limit"),
       write_drafts: formData.get("write_drafts") === "on",
@@ -58,8 +63,8 @@ export async function cancelMission(missionId: string) {
   revalidatePath("/");
 }
 
-function sameMission(a: unknown, b: { segments: string[]; governorates: string[] }): boolean {
-  const p = a as { segments?: string[]; governorates?: string[] } | null;
+function sameMission(a: unknown, b: { segments: string[]; governorates: string[]; source: string }): boolean {
+  const p = a as { segments?: string[]; governorates?: string[]; source?: string } | null;
   const key = (x: string[] | undefined) => [...(x ?? [])].sort().join(",");
-  return key(p?.segments) === key(b.segments) && key(p?.governorates) === key(b.governorates);
+  return (p?.source ?? "discover") === b.source && key(p?.segments) === key(b.segments) && key(p?.governorates) === key(b.governorates);
 }

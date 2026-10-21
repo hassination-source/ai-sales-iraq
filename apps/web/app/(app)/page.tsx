@@ -18,7 +18,7 @@ export default async function AgentHome({ searchParams }: { searchParams: Promis
   const since = new Date();
   since.setUTCHours(-3, 0, 0, 0); // start of today in Baghdad
 
-  const [events, missions, foundToday, researchedToday, waiting, docs, settings] = await Promise.all([
+  const [events, missions, foundToday, researchedToday, waiting, docs, settings, imported] = await Promise.all([
     sb.from("agent_events").select("id, type, level, data, company_id, draft_id, mission_id, created_at").eq("tenant_id", tid).order("id", { ascending: false }).limit(60),
     sb.from("agent_missions").select("id, params, status, phase, progress, note, next_run_at, created_at").eq("tenant_id", tid).order("created_at", { ascending: false }).limit(6),
     sb.from("companies").select("id", { count: "exact", head: true }).eq("tenant_id", tid).eq("source_type", "api").gte("created_at", since.toISOString()),
@@ -26,7 +26,9 @@ export default async function AgentHome({ searchParams }: { searchParams: Promis
     sb.from("message_drafts").select("id", { count: "exact", head: true }).eq("tenant_id", tid).eq("status", "pending_review"),
     sb.from("knowledge_docs").select("id", { count: "exact", head: true }).eq("tenant_id", tid).eq("status", "active"),
     sb.from("agent_settings").select("paused").eq("tenant_id", tid).maybeSingle(),
+    sb.from("companies").select("id", { count: "exact", head: true }).eq("tenant_id", tid).in("source_type", ["csv_import", "xlsx_import", "manual"]).is("mission_id", null),
   ]);
+  const importedCount = imported.count ?? 0;
 
   const integrations = integrationStatus();
   const active = (missions.data ?? []).filter((m) => ["queued", "running"].includes(m.status));
@@ -77,6 +79,19 @@ export default async function AgentHome({ searchParams }: { searchParams: Promis
               <p className="mt-1 text-sm text-muted">{ar ? "أخبر الوكيل عن من يبحث وأين." : "Tell the agent who to look for, and where."}</p>
               <form action={startMission} className="mt-4 space-y-4">
                 <fieldset>
+                  <legend className="label">{ar ? "من أين؟" : "Where from?"}</legend>
+                  <div className="mt-1 space-y-1.5 text-sm">
+                    <label className="flex items-center gap-2">
+                      <input type="radio" name="source" value="discover" defaultChecked className="accent-lapis" />
+                      {ar ? "ابحث عن شركات جديدة (Google وOpenStreetMap)" : "Find new companies (Google & OpenStreetMap)"}
+                    </label>
+                    <label className="flex items-center gap-2">
+                      <input type="radio" name="source" value="leads" className="accent-lapis" />
+                      {ar ? `من قائمتي المستوردة (${fmtNumber(lang, importedCount)} شركة لم يُراسَل بعد)` : `From my imported list (${importedCount} companies not yet contacted)`}
+                    </label>
+                  </div>
+                </fieldset>
+                <fieldset>
                   <legend className="label">{ar ? "نوع العملاء" : "Type of customer"}</legend>
                   <div className="mt-1 space-y-1.5">
                     {ctx.config.segments.map((s, i) => (
@@ -85,6 +100,10 @@ export default async function AgentHome({ searchParams }: { searchParams: Promis
                         {tx(s.label, lang)}
                       </label>
                     ))}
+                    <label className="flex items-center gap-2 text-sm text-muted">
+                      <input type="checkbox" name="segments" value="_other" className="accent-lapis" />
+                      {ar ? "أخرى / بلا تصنيف (للقائمة المستوردة فقط)" : "Other / uncategorised (imported list only)"}
+                    </label>
                   </div>
                 </fieldset>
                 <fieldset>
@@ -126,7 +145,10 @@ export default async function AgentHome({ searchParams }: { searchParams: Promis
                   };
                   return (
                     <li key={m.id} className="border-b border-line pb-3 last:border-0 last:pb-0">
-                      <p className="text-sm font-medium">{params.segments.map((s) => segLabel[s] ?? s).join(ar ? "، " : ", ")}</p>
+                      <p className="text-sm font-medium">
+                        {(params as { source?: string }).source === "leads" && <span className="me-1 rounded bg-paper px-1.5 py-0.5 text-xs text-muted ring-1 ring-line">{ar ? "قائمتي" : "My list"}</span>}
+                        {params.segments.map((s) => (s === "_other" ? (ar ? "أخرى" : "Other") : segLabel[s] ?? s)).join(ar ? "، " : ", ")}
+                      </p>
                       <p className="text-xs text-muted">{params.governorates.map(govName).join(ar ? "، " : ", ")}</p>
                       <p className="mt-1 flex flex-wrap items-center gap-x-3 text-xs">
                         <span className={m.status === "running" ? "text-lapis" : m.status === "failed" ? "text-brick" : "text-muted"}>{status[m.status]?.[ar ? 0 : 1]}</span>

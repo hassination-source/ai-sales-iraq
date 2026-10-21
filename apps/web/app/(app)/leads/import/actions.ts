@@ -1,7 +1,8 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { parseCsv, prepareImport, scoreCompany, type ImportResult } from "@ais/core";
+import { GOVERNORATES, matchSegment, prepareImport, scoreCompany, type ImportResult } from "@ais/core";
+import { z } from "zod";
 import { getContext } from "@/lib/tenant";
 import { supabaseServer } from "@/lib/supabase/server";
 
@@ -19,19 +20,26 @@ export interface Preview {
 }
 type Failure = { ok: false; message: string };
 
-async function prepare(text: string): Promise<{ result: ImportResult; total: number } | Failure> {
-  if (text.length > MAX_BYTES) return { ok: false, message: "file_too_large" };
-  const rows = parseCsv(text);
-  if (rows.length - 1 > MAX_ROWS) return { ok: false, message: "too_many_rows" };
+/** Rows come from the browser (CSV or Excel parsed there); validated and capped here. */
+const Rows = z.array(z.array(z.string().max(5000)).max(60)).max(MAX_ROWS + 40);
+const Gov = z.enum(GOVERNORATES.map((g) => g.code) as [string, ...string[]]).nullable();
+
+async function prepare(input: unknown, defaultGovernorate: unknown): Promise<{ result: ImportResult; total: number } | Failure> {
+  if (JSON.stringify(input ?? null).length > MAX_BYTES) return { ok: false, message: "file_too_large" };
+  const parsed = Rows.safeParse(input);
+  if (!parsed.success) return { ok: false, message: parsed.error.issues[0]?.code === "too_big" ? "too_many_rows" : "unreadable" };
+  const gov = Gov.safeParse(defaultGovernorate ?? null);
+  const rows = parsed.data;
   const ctx = await getContext();
   const sb = await supabaseServer();
   const { data: existing, error } = await sb.from("companies").select("id, name_normalized, governorate, phone, website").eq("tenant_id", ctx.tenant.id).limit(50_000);
   if (error) return { ok: false, message: error.message };
-  return { result: prepareImport(rows, existing ?? []), total: Math.max(0, rows.length - 1) };
+  const result = prepareImport(rows, existing ?? [], undefined, { defaultGovernorate: gov.success ? gov.data : null });
+  return { result, total: result.ready.length + result.duplicates.length + result.errors.filter((e) => e.row > 1).length };
 }
 
-export async function previewImport(text: string): Promise<Preview | Failure> {
-  const p = await prepare(text);
+export async function previewImport(rows: string[][], defaultGovernorate: string | null): Promise<Preview | Failure> {
+  const p = await prepare(rows, defaultGovernorate);
   if ("ok" in p) return p;
   const { result, total } = p;
   return {
@@ -45,17 +53,27 @@ export async function previewImport(text: string): Promise<Preview | Failure> {
   };
 }
 
-export async function importLeads(text: string, fileName: string): Promise<{ ok: true; imported: number } | Failure> {
-  const p = await prepare(text);
+export async function importLeads(rows: string[][], fileName: string, defaultGovernorate: string | null): Promise<{ ok: true; imported: number } | Failure> {
+  const p = await prepare(rows, defaultGovernorate);
   if ("ok" in p) return p;
   const ctx = await getContext();
   const sb = await supabaseServer();
   const leads = p.result.ready;
+  const sourceType = /\.xlsx?$/i.test(fileName) ? "xlsx_import" : "csv_import";
   let imported = 0;
 
   for (let i = 0; i < leads.length; i += 500) {
     const chunk = leads.slice(i, i + 500);
-    const rows = chunk.map((l) => ({
+    const rows = chunk.map((l) => {
+      const segment = matchSegment(ctx.config.segments, l.industry);
+      const attributes: Record<string, unknown> = {
+        ...(segment ? { segment } : {}),
+        ...(l.name_alt ? { name_alt: l.name_alt.slice(0, 300) } : {}),
+        ...(l.extra_phones.length ? { extra_phones: l.extra_phones } : {}),
+        ...(l.extra_emails.length ? { extra_emails: l.extra_emails } : {}),
+        import_file: fileName.slice(0, 120),
+      };
+      return {
       tenant_id: ctx.tenant.id,
       name: l.name,
       name_normalized: l.name_normalized,
@@ -67,11 +85,14 @@ export async function importLeads(text: string, fileName: string): Promise<{ ok:
       phone: l.phone,
       email: l.email,
       description: l.description,
-      source_type: "csv_import",
+      attributes,
+      source_type: sourceType,
+      source_url: l.source_url,
       source_ref: `${fileName.slice(0, 120)}#row${l.row}`,
-      fit_score: scoreCompany(ctx.config, l).normalized,
+      fit_score: scoreCompany(ctx.config, { ...l, attributes }).normalized,
       owner_id: ctx.userId,
-    }));
+      };
+    });
     const { data: inserted, error } = await sb.from("companies").insert(rows).select("id, source_ref");
     if (error) return { ok: false, message: error.message };
 
@@ -90,7 +111,7 @@ export async function importLeads(text: string, fileName: string): Promise<{ ok:
       const { error: ce } = await sb.from("contacts").insert(contacts);
       if (ce) return { ok: false, message: ce.message };
     }
-    await sb.from("activities").insert(inserted.map((r) => ({ tenant_id: ctx.tenant.id, type: "lead.imported", company_id: r.id, actor_id: ctx.userId, payload: { source: "csv_import" } })));
+    await sb.from("activities").insert(inserted.map((r) => ({ tenant_id: ctx.tenant.id, type: "lead.imported", company_id: r.id, actor_id: ctx.userId, payload: { source: sourceType } })));
     imported += inserted.length;
   }
   revalidatePath("/leads");

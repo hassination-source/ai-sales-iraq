@@ -396,3 +396,28 @@ describe("rewrite", () => {
     expect((await rewriteDraft(db, ai, T, "old", "", f)).status).toBe("failed");
   });
 });
+
+describe("missions over imported leads", () => {
+  it("takes matching imported companies (best first, with email), never searches, and drafts for them", async () => {
+    const { db, mission } = setup({ source: "leads", segments: ["hotel", "_other"], governorates: ["IQ-BG"], limit: 2 });
+    db.tables.knowledge_docs = [{ id: "doc-1", tenant_id: T, title: "Products", body: "Sigenergy SigenStor", status: "active", updated_at: "1" }];
+    const co = (id: string, extra: Record<string, unknown>) => ({ id, tenant_id: T, name: id, governorate: "IQ-BG", source_type: "xlsx_import", mission_id: null, email: `${id}@x.iq`, fit_score: 50, attributes: { segment: "hotel" }, ...extra });
+    db.tables.companies = [
+      co("h-low", { fit_score: 10 }),
+      co("h-high", { fit_score: 90 }),
+      co("pc", { attributes: {}, fit_score: 60 }), // uncategorised: included through "_other"
+      co("factory", { attributes: { segment: "factory" }, fit_score: 99 }),
+      co("no-mail", { email: null, fit_score: 99 }),
+      co("basra", { governorate: "IQ-BA", fit_score: 99 }),
+      co("taken", { mission_id: "other-mission", fit_score: 99 }),
+      co("found-online", { source_type: "api", fit_score: 99 }),
+    ];
+    // imported leads have no website: the draft may only cite the knowledge base
+    const { f, calls } = fakeFetch({ ai: { content: [{ type: "tool_use", name: "submit_draft", input: { decision: "write", skip_reason: null, subject: "s", body: "b", sources_used: ["kb:doc-1"], hypotheses: [] } }], usage: { input_tokens: 10, output_tokens: 10 } } });
+    await runMission(mission, { db, fetch: f, ai, deadline: far() });
+    expect(calls.some((u) => OVERPASS_MIRRORS.includes(u))).toBe(false);
+    expect(db.rows("companies").filter((c) => c.mission_id === "m1").map((c) => c.id).sort()).toEqual(["h-high", "pc"]);
+    expect(db.rows("message_drafts").map((d) => d.company_id).sort()).toEqual(["h-high", "pc"]);
+    expect(db.rows("agent_events").map((e) => e.type)).toContain("leads.claimed");
+  });
+});

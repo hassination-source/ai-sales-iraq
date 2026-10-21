@@ -26,7 +26,8 @@ export type Db = { from: (table: string) => any; rpc: (fn: string, args?: Record
 export interface Mission {
   id: string;
   tenant_id: string;
-  params: { segments: string[]; governorates: string[]; limit: number; write_drafts?: boolean };
+  /** source "leads": work through companies already in the leads (imported lists) instead of searching */
+  params: { segments: string[]; governorates: string[]; limit: number; write_drafts?: boolean; source?: "discover" | "leads" };
   status: string;
   phase: "discover" | "research" | "draft" | "finished";
   progress: Progress;
@@ -99,6 +100,15 @@ export async function runMission(m: Mission, deps: Deps): Promise<void> {
   }
 
   let phase = m.phase;
+  if (phase === "discover" && m.params.source === "leads") {
+    await claimLeads(m, progress, deps, ev);
+    if ((progress.found ?? 0) === 0) {
+      await ev("mission.done", { found: 0 }, "warning");
+      return void (await save({ status: "done", phase: "finished", note: "no matching leads", finished_at: new Date().toISOString(), locked_until: null }));
+    }
+    phase = "research";
+    await save({ phase });
+  }
   if (phase === "discover") {
     const r = await discover(m, cfg, progress, deps, ev);
     if (r.kind === "wait") return void (await save({ status: "running", locked_until: null, next_run_at: new Date(Date.now() + r.ms).toISOString() }));
@@ -142,6 +152,40 @@ type Ev = (type: string, data?: Record<string, unknown>, level?: string, extra?:
 
 /* ------------------------------------------------------------------ discover */
 type DiscoverResult = { kind: "done" } | { kind: "timeup" } | { kind: "wait"; ms: number };
+
+/** Pseudo-segment for imported companies whose category didn't map to any segment. */
+export const UNSEGMENTED = "_other";
+const IMPORTED = ["csv_import", "xlsx_import", "manual"];
+
+/**
+ * Take companies already in the leads (not yet in any mission) that match the mission's segments and
+ * governorates, best fit first. With drafting on, only companies that have an email address.
+ */
+async function claimLeads(m: Mission, p: Progress, deps: Deps, ev: Ev): Promise<void> {
+  const { db } = deps;
+  let q = db
+    .from("companies")
+    .select("id, email, attributes, fit_score")
+    .eq("tenant_id", m.tenant_id)
+    .is("mission_id", null)
+    .in("source_type", IMPORTED)
+    .in("governorate", m.params.governorates);
+  if (m.params.write_drafts !== false) q = q.not("email", "is", null);
+  const { data } = await q.order("fit_score", { ascending: false }).limit(5000);
+  const wanted = new Set(m.params.segments);
+  const picked = (data ?? [])
+    .filter((c: { attributes: { segment?: string } | null }) => wanted.has(c.attributes?.segment ?? UNSEGMENTED))
+    .slice(0, m.params.limit)
+    .map((c: { id: string }) => c.id);
+  let claimed = 0;
+  for (let i = 0; i < picked.length; i += 200) {
+    // only rows still unclaimed: two missions never take the same company
+    const { data: rows } = await db.from("companies").update({ mission_id: m.id }).eq("tenant_id", m.tenant_id).in("id", picked.slice(i, i + 200)).is("mission_id", null).select("id");
+    claimed += rows?.length ?? 0;
+  }
+  p.found = claimed;
+  await ev("leads.claimed", { count: claimed, available: (data ?? []).length }, claimed ? "success" : "info");
+}
 
 type Source = "osm" | "google";
 /** Pair keys: "seg|gov" (OpenStreetMap, the original format) and "google:seg|gov". */
@@ -435,7 +479,7 @@ async function draft(m: Mission, cfg: EffectiveConfig, p: Progress, deps: Deps, 
     }
 
     const [{ data: candidates }, { data: drafted }, { data: attempted }, { data: optedOut }] = await Promise.all([
-      db.from("companies").select("id, name, governorate, email, source_url, attributes").eq("tenant_id", m.tenant_id).eq("mission_id", m.id).order("fit_score", { ascending: false }).limit(200),
+      db.from("companies").select("id, name, governorate, email, source_url, source_type, industry, description, attributes").eq("tenant_id", m.tenant_id).eq("mission_id", m.id).order("fit_score", { ascending: false }).limit(200),
       db.from("message_drafts").select("company_id").eq("tenant_id", m.tenant_id).not("company_id", "is", null),
       db.from("agent_events").select("company_id").eq("tenant_id", m.tenant_id).eq("mission_id", m.id).in("type", ["draft.skipped", "draft.invalid"]),
       db.from("email_suppressions").select("email").eq("tenant_id", m.tenant_id),
@@ -473,7 +517,7 @@ async function draft(m: Mission, cfg: EffectiveConfig, p: Progress, deps: Deps, 
           name: next.name,
           governorate: next.governorate,
           segmentLabel: seg ? t(seg.label, "en") : null,
-          directory: next.source_url ? directoryFacts(next.source_url, next.attributes) : null,
+          directory: directoryFacts(next),
           website: r?.status === "ok" ? { url: r.url, title: r.title, description: r.description, text: r.text ?? "", emails: r.emails, phones: r.phones, language: r.language } : null,
         },
       },
@@ -524,12 +568,23 @@ async function draft(m: Mission, cfg: EffectiveConfig, p: Progress, deps: Deps, 
   }
 }
 
-/** What the directory listing says about the company, labelled with the directory it came from. */
-export function directoryFacts(url: string, attributes: Record<string, unknown> | null) {
-  const google = attributes?.provider === "google";
-  const raw = (google ? attributes?.google : attributes?.osm) as Record<string, unknown> | undefined;
-  const facts = Object.fromEntries(Object.entries(raw ?? {}).filter(([k]) => k !== "expires_at").map(([k, v]) => [k, String(v)]));
-  return { source: google ? "Google Maps" : "OpenStreetMap", url, facts };
+/** What the listing the company came from says about it, labelled with where it came from. */
+export function directoryFacts(c: { source_url?: string | null; source_type?: string | null; industry?: string | null; description?: string | null; attributes: Record<string, unknown> | null }) {
+  const a = c.attributes ?? {};
+  if (a.provider === "google" || a.provider === "osm" || a.osm) {
+    if (!c.source_url) return null;
+    const google = a.provider === "google";
+    const raw = (google ? a.google : a.osm) as Record<string, unknown> | undefined;
+    const facts = Object.fromEntries(Object.entries(raw ?? {}).filter(([k]) => k !== "expires_at").map(([k, v]) => [k, String(v)]));
+    return { source: google ? "Google Maps" : "OpenStreetMap", url: c.source_url, facts };
+  }
+  // imported by the user from their own list (Excel/CSV)
+  const facts: Record<string, string> = {};
+  if (c.industry) facts.category = c.industry.slice(0, 200);
+  if (c.description) facts.note = c.description.slice(0, 300);
+  if (typeof a.name_alt === "string") facts.other_name = a.name_alt.slice(0, 200);
+  if (!Object.keys(facts).length && !c.source_url) return null;
+  return { source: "Company list imported by the user (not verified)", url: c.source_url ?? "", facts };
 }
 
 /** Pages that aren't the company's own site: reading them tells us nothing about the business. */

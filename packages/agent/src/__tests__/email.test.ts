@@ -3,6 +3,7 @@ import { composeEmailHtml, composeEmailText, linkify, sendApprovedDraft, senderF
 import { FakeDb } from "./fake-db";
 
 const T = "tenant-1";
+const ok = async () => true;
 const cfg = { apiKey: "re_test_key", from: "Sigen Solar Energy <sales@sigensol.com>", baseUrl: "https://app.example/", secret: "s3cret" };
 
 function setup(draft: Record<string, unknown> = {}, company: Record<string, unknown> = {}) {
@@ -46,7 +47,7 @@ describe("sendApprovedDraft", () => {
   it("sends an approved draft once, with unsubscribe headers, and records it", async () => {
     const db = setup();
     const { f, calls } = resend();
-    const r = await sendApprovedDraft(db, cfg, T, "d1", f);
+    const r = await sendApprovedDraft(db, cfg, T, "d1", f, ok);
     expect(r).toEqual({ status: "sent", to: "info@baghdad-factory.com" });
     expect(calls).toHaveLength(1);
     const { headers, body } = calls[0]!;
@@ -61,7 +62,7 @@ describe("sendApprovedDraft", () => {
     expect(db.rows("activities").map((a) => a.type)).toEqual(["message.sent"]);
 
     // a second call does nothing: the draft is no longer approved
-    expect(await sendApprovedDraft(db, cfg, T, "d1", f)).toEqual({ status: "skipped", reason: "not_approved" });
+    expect(await sendApprovedDraft(db, cfg, T, "d1", f, ok)).toEqual({ status: "skipped", reason: "not_approved" });
     expect(calls).toHaveLength(1);
   });
 
@@ -69,28 +70,28 @@ describe("sendApprovedDraft", () => {
     const db = setup();
     await suppress(db, T, "INFO@baghdad-factory.com", "unsubscribed");
     const { f, calls } = resend();
-    expect(await sendApprovedDraft(db, cfg, T, "d1", f)).toEqual({ status: "skipped", reason: "suppressed" });
+    expect(await sendApprovedDraft(db, cfg, T, "d1", f, ok)).toEqual({ status: "skipped", reason: "suppressed" });
     expect(calls).toHaveLength(0);
   });
 
   it("skips drafts that aren't approved, other tenants' drafts, and companies without a valid email", async () => {
     const { f, calls } = resend();
-    expect(await sendApprovedDraft(setup({ status: "pending_review" }), cfg, T, "d1", f)).toMatchObject({ reason: "not_approved" });
+    expect(await sendApprovedDraft(setup({ status: "pending_review" }), cfg, T, "d1", f, ok)).toMatchObject({ reason: "not_approved" });
     expect(await sendApprovedDraft(setup(), cfg, "other-tenant", "d1", f)).toMatchObject({ reason: "not_approved" });
-    expect(await sendApprovedDraft(setup({}, { email: null }), cfg, T, "d1", f)).toMatchObject({ reason: "no_email" });
-    expect(await sendApprovedDraft(setup({}, { email: "not an email" }), cfg, T, "d1", f)).toMatchObject({ reason: "no_email" });
+    expect(await sendApprovedDraft(setup({}, { email: null }), cfg, T, "d1", f, ok)).toMatchObject({ reason: "no_email" });
+    expect(await sendApprovedDraft(setup({}, { email: "not an email" }), cfg, T, "d1", f, ok)).toMatchObject({ reason: "no_email" });
     expect(calls).toHaveLength(0);
   });
 
   it("a rejected request marks the draft failed; a temporary error leaves it approved for another try", async () => {
     const db1 = setup();
     const bad = resend(422, { name: "validation_error", message: "The sigensol.com domain is not verified" });
-    expect(await sendApprovedDraft(db1, cfg, T, "d1", bad.f)).toMatchObject({ status: "failed", retryable: false });
+    expect(await sendApprovedDraft(db1, cfg, T, "d1", bad.f, ok)).toMatchObject({ status: "failed", retryable: false });
     expect(db1.rows("message_drafts")[0]).toMatchObject({ status: "failed", send_error: expect.stringContaining("not verified") });
 
     const db2 = setup();
     const busy = resend(503, {});
-    expect(await sendApprovedDraft(db2, cfg, T, "d1", busy.f)).toMatchObject({ status: "failed", retryable: true });
+    expect(await sendApprovedDraft(db2, cfg, T, "d1", busy.f, ok)).toMatchObject({ status: "failed", retryable: true });
     expect(db2.rows("message_drafts")[0]).toMatchObject({ status: "approved", send_error: "HTTP 503" });
   });
 });
@@ -117,5 +118,16 @@ describe("HTML email", () => {
     expect(html).toContain('<div dir="ltr" style="font-size:13px;color:#5b6474;margin-top:2px"><a href="https://www.sigensol.com"');
     expect(html).toContain('<a href="https://app/u/tok" style="color:#8a919c">إلغاء الاشتراك</a>');
     expect(html).not.toContain(">https://app/u/tok<");
+  });
+});
+
+describe("dead domains", () => {
+  it("doesn't send to a domain without a mail server", async () => {
+    const db = setup();
+    const { f, calls } = resend();
+    const r = await sendApprovedDraft(db, cfg, T, "d1", f, async (d) => d !== "baghdad-factory.com");
+    expect(r).toMatchObject({ status: "failed", retryable: false });
+    expect(calls).toHaveLength(0);
+    expect(db.rows("message_drafts")[0]).toMatchObject({ status: "failed", send_error: expect.stringContaining("no mail server") });
   });
 });
