@@ -5,6 +5,7 @@ import { integrationStatus } from "@/lib/supabase/service";
 import { getLang, fmtDate } from "@/lib/i18n";
 import { reviewDraft, rewriteDraft, saveDraft, sendDraft } from "./actions";
 import { whatsappLink } from "@/lib/whatsapp";
+import { SubmitButton } from "@/components/submit-button";
 
 // "Rewrite" calls the AI model inside the server action.
 export const maxDuration = 60;
@@ -33,7 +34,7 @@ export default async function ApprovalsPage({ searchParams }: { searchParams: Pr
     saved: ["تم حفظ التعديلات.", "Changes saved."],
     rewritten: ["كتب الوكيل نسخة جديدة. تجدها في آخر القائمة.", "The agent wrote a new version. You'll find it at the end of the list."],
   };
-  const errors: Record<string, [string, string]> = { ai_off: ["الكتابة بالذكاء الاصطناعي غير مفعّلة.", "AI writing isn't switched on."], invalid: ["العنوان والنص مطلوبان.", "Subject and text are required."], role: ["فقط المدير أو المسؤول يمكنه الموافقة.", "Only a manager or admin can approve."] };
+  const errors: Record<string, [string, string]> = { already_reviewed: ["هذه الرسالة رُوجعت مسبقاً.", "This message was already reviewed."], ai_off: ["الكتابة بالذكاء الاصطناعي غير مفعّلة.", "AI writing isn't switched on."], invalid: ["العنوان والنص مطلوبان.", "Subject and text are required."], role: ["فقط المدير أو المسؤول يمكنه الموافقة.", "Only a manager or admin can approve."] };
   const skipNotes: Record<string, [string, string]> = {
     no_email: ["لا يوجد بريد إلكتروني لهذه الشركة، لذلك لم تُرسل. تواصل معهم هاتفياً أو عبر واتساب.", "This company has no email address, so nothing was sent. Reach them by phone or WhatsApp."],
     suppressed: ["هذا العنوان طلب عدم مراسلته، لذلك لم تُرسل.", "This address asked not to be contacted, so nothing was sent."],
@@ -111,8 +112,8 @@ export default async function ApprovalsPage({ searchParams }: { searchParams: Pr
                   </div>
 
                   <div className="flex flex-wrap items-center gap-3 pt-1">
-                    {canReview && <button formAction={reviewDraft.bind(null, d.id, "approved")} className="btn-primary">{ar ? "موافقة" : "Approve"}</button>}
-                    <button formAction={saveDraft.bind(null, d.id)} className="btn-quiet">{ar ? "حفظ التعديلات" : "Save changes"}</button>
+                    {canReview && <SubmitButton formAction={reviewDraft.bind(null, d.id, "approved")} className="btn-primary">{ar ? "موافقة" : "Approve"}</SubmitButton>}
+                    <SubmitButton formAction={saveDraft.bind(null, d.id)} className="btn-quiet">{ar ? "حفظ التعديلات" : "Save changes"}</SubmitButton>
                     {wa && (
                       <a href={wa} target="_blank" rel="noreferrer" className="btn-quiet" title={ar ? "يفتح واتساب والرسالة جاهزة؛ احفظ تعديلاتك أولاً" : "Opens WhatsApp with the message filled in; save your edits first"}>
                         {ar ? "واتساب" : "WhatsApp"}
@@ -121,13 +122,13 @@ export default async function ApprovalsPage({ searchParams }: { searchParams: Pr
                     {canReview && (
                       <span className="flex items-center gap-2">
                         <input className="field w-56 py-1.5 text-sm" name="feedback" maxLength={500} placeholder={ar ? "ماذا تريد أن يتغير؟ (اختياري)" : "What should change? (optional)"} aria-label={ar ? "ملاحظات لإعادة الكتابة" : "Rewrite feedback"} />
-                        <button formAction={rewriteDraft.bind(null, d.id)} className="btn-quiet">{ar ? "أعد الكتابة" : "Rewrite"}</button>
+                        <SubmitButton formAction={rewriteDraft.bind(null, d.id)} className="btn-quiet">{ar ? "أعد الكتابة" : "Rewrite"}</SubmitButton>
                       </span>
                     )}
                     {canReview && (
                       <span className="ms-auto flex items-center gap-2">
                         <input className="field w-48 py-1.5 text-sm" name="reject_reason" placeholder={ar ? "سبب الرفض (اختياري)" : "Reason (optional)"} aria-label={ar ? "سبب الرفض" : "Reject reason"} />
-                        <button formAction={reviewDraft.bind(null, d.id, "rejected")} className="btn text-brick hover:bg-brick-soft">{ar ? "رفض" : "Reject"}</button>
+                        <SubmitButton formAction={reviewDraft.bind(null, d.id, "rejected")} className="btn text-brick hover:bg-brick-soft">{ar ? "رفض" : "Reject"}</SubmitButton>
                       </span>
                     )}
                   </div>
@@ -153,7 +154,7 @@ export default async function ApprovalsPage({ searchParams }: { searchParams: Pr
                   <span className="flex items-center gap-3">
                     {r.status === "approved" && emailReady && canReview && co?.email && (
                       <form action={sendDraft.bind(null, r.id)}>
-                        <button className="btn-quiet py-1 text-xs">{ar ? "إرسال الآن" : "Send now"}</button>
+                        <SubmitButton className="btn-quiet py-1 text-xs">{ar ? "إرسال الآن" : "Send now"}</SubmitButton>
                       </form>
                     )}
                     <span className={r.status === "rejected" || r.status === "failed" ? "text-brick" : "text-lapis"}>

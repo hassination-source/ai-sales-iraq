@@ -43,8 +43,14 @@ export async function reviewDraft(draftId: string, decision: "approved" | "rejec
     .eq("tenant_id", ctx.tenant.id)
     .eq("status", "pending_review")
     .select("company_id")
-    .single();
+    .maybeSingle();
   if (error) back(`error=${encodeURIComponent(error.message)}`);
+  if (!draft) {
+    // nothing pending matched: usually a second click on the same button after the first already went through
+    const { data: now } = await sb.from("message_drafts").select("status").eq("id", draftId).eq("tenant_id", ctx.tenant.id).maybeSingle();
+    if (now?.status === decision || (decision === "approved" && ["sent", "failed"].includes(now?.status ?? ""))) back(decision === "approved" ? "approved=1" : "rejected=1");
+    back("error=already_reviewed");
+  }
   await sb.from("activities").insert({ tenant_id: ctx.tenant.id, type: decision === "approved" ? "draft.approved" : "draft.rejected", company_id: draft?.company_id ?? null, actor_id: ctx.userId, payload: { draft_id: draftId } });
   revalidatePath("/approvals");
   revalidatePath("/");
