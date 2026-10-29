@@ -8,7 +8,7 @@ import { ActivityFeed } from "@/components/activity-feed";
 import type { AgentEvent } from "@/lib/events";
 import { cancelMission, startMission } from "./agent-actions";
 
-export default async function AgentHome({ searchParams }: { searchParams: Promise<{ error?: string; started?: string }> }) {
+export default async function AgentHome({ searchParams }: { searchParams: Promise<{ error?: string; started?: string; notice?: string }> }) {
   const sp = await searchParams;
   const ctx = await getContext();
   const lang = await getLang();
@@ -62,6 +62,7 @@ export default async function AgentHome({ searchParams }: { searchParams: Promis
       </header>
 
       {sp.error && <p className="note-error">{errors[sp.error]?.[ar ? 0 : 1] ?? sp.error}</p>}
+      {sp.notice === "passwordChanged" && <p className="note-info">{ar ? "تم تغيير كلمة المرور." : "Your password has been changed."}</p>}
       {sp.started && <p className="note-info">{ar ? "بدأ الوكيل العمل. ستظهر خطواته هنا خلال دقيقة." : "The agent has started. Its steps will show up here within a minute."}</p>}
 
       <div className="grid gap-8 xl:grid-cols-[1fr_22rem]">

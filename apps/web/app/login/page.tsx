@@ -1,13 +1,15 @@
 import Link from "next/link";
 import { getLang, translator } from "@/lib/i18n";
 import { LangSwitch } from "@/components/lang-switch";
-import { signIn, signUp } from "./actions";
+import { requestPasswordReset, signIn, signUp } from "./actions";
 
 export default async function LoginPage({ searchParams }: { searchParams: Promise<Record<string, string | undefined>> }) {
   const sp = await searchParams;
   const lang = await getLang();
   const t = translator(lang);
   const signup = sp.mode === "signup";
+  const forgot = sp.mode === "forgot";
+  const ar = lang === "ar";
   const knownErrors = ["badLogin", "weakPassword"];
   const error = sp.error ? (knownErrors.includes(sp.error) ? t(`auth.${sp.error}`) : sp.error) : null;
 
@@ -31,9 +33,27 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
       <section className="flex flex-col p-6 sm:p-10">
         <div className="flex justify-end"><LangSwitch lang={lang} /></div>
         <div className="m-auto w-full max-w-sm">
-          <h1 className="text-2xl font-semibold">{signup ? t("auth.signupTitle") : t("auth.title")}</h1>
+          <h1 className="text-2xl font-semibold">{forgot ? (ar ? "نسيت كلمة المرور" : "Forgot password") : signup ? t("auth.signupTitle") : t("auth.title")}</h1>
           {sp.notice === "checkEmail" && <p className="note-info mt-4">{t("auth.checkEmail")}</p>}
+          {sp.notice === "resetSent" && (
+            <p className="note-info mt-4">
+              {ar ? "إذا كان لهذا البريد حساب، أرسلنا إليه رابطاً لتعيين كلمة مرور جديدة. افتح الرابط في هذا المتصفح نفسه." : "If that email has an account, we've sent it a link to set a new password. Open the link in this same browser."}
+            </p>
+          )}
           {error && <p className="note-error mt-4">{error}</p>}
+          {forgot ? (
+            <>
+              <form action={requestPasswordReset} className="mt-6 space-y-4">
+                <div>
+                  <label className="label" htmlFor="email">{t("auth.email")}</label>
+                  <input className="field" id="email" name="email" type="email" autoComplete="email" required dir="ltr" />
+                </div>
+                <button className="btn-primary w-full">{ar ? "أرسل رابط إعادة التعيين" : "Send reset link"}</button>
+              </form>
+              <Link href="/login" className="mt-6 block text-sm text-lapis hover:underline">{t("auth.toSignin")}</Link>
+            </>
+          ) : (
+          <>
           <form action={signup ? signUp : signIn} className="mt-6 space-y-4">
             <div>
               <label className="label" htmlFor="email">{t("auth.email")}</label>
@@ -45,9 +65,14 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
             </div>
             <button className="btn-primary w-full">{signup ? t("auth.signUp") : t("auth.signIn")}</button>
           </form>
+          {!signup && (
+            <Link href="/login?mode=forgot" className="mt-4 block text-sm text-lapis hover:underline">{ar ? "نسيت كلمة المرور؟" : "Forgot your password?"}</Link>
+          )}
           <Link href={signup ? "/login" : "/login?mode=signup"} className="mt-6 block text-sm text-lapis hover:underline">
             {signup ? t("auth.toSignin") : t("auth.toSignup")}
           </Link>
+          </>
+          )}
         </div>
       </section>
     </main>
