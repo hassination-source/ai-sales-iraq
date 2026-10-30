@@ -24,25 +24,25 @@ export const solarEnergyPack = definePack({
       ],
       discovery: {
         osm: [[{ key: "man_made", value: "works" }], [{ key: "industrial" }], [{ key: "craft", value: "brewery|winery|distillery|confectionery|bakery", regex: true }]],
-        searchTerms: [{ ar: "مصنع", en: "factory" }, { ar: "معمل", en: "plant" }], importKeywords: ["industri", "fabrik", "tillverk", "plast", "kemikal", "vattenproduktion", "livsmedel", "järn", "aluminium", "svets", "konditori", "factory", "industr", "manufactur", "plastic", "chemical", "steel", "مصنع", "معمل", "صناعات"],
+        searchTerms: [{ ar: "مصنع", en: "factory" }, { ar: "معمل", en: "plant" }], importKeywords: ["industri", "fabrik", "tillverk", "plast", "kemikal", "vattenproduktion", "livsmedel", "järn", "aluminium", "svets", "konditori", "factory", "industr", "manufactur", "plastic", "chemical", "steel", "مصنع", "معمل", "صناعات", "oil", "gas", "aluminum", "welding", "cement", "ceramic", "paint", "mineral water", "lubricant", "printing", "food"],
       },
     },
     {
       key: "hotel",
       label: { ar: "فنادق", en: "Hotels" },
       painPoints: [{ ar: "الحاجة لكهرباء مستمرة للنزلاء", en: "Need for uninterrupted power for guests" }],
-      discovery: { osm: [[{ key: "tourism", value: "hotel|motel", regex: true }]], searchTerms: [{ ar: "فندق", en: "hotel" }], importKeywords: ["hotell", "hotel", "motel", "فندق", "فنادق"] },
+      discovery: { osm: [[{ key: "tourism", value: "hotel|motel", regex: true }]], searchTerms: [{ ar: "فندق", en: "hotel" }], importKeywords: ["hotell", "hotel", "motel", "فندق", "فنادق", "tourism", "resort"] },
     },
     {
       key: "hospital",
       label: { ar: "مستشفيات ومراكز صحية", en: "Hospitals & clinics" },
       painPoints: [{ ar: "أجهزة حرجة تحتاج طاقة احتياطية", en: "Critical equipment needs backup power" }],
-      discovery: { osm: [[{ key: "amenity", value: "hospital" }], [{ key: "healthcare", value: "hospital" }]], searchTerms: [{ ar: "مستشفى", en: "hospital" }], importKeywords: ["sjukhus", "klinik", "vårdcentral", "hospital", "clinic", "medical", "مستشفى", "مستشفي", "مستوصف"] },
+      discovery: { osm: [[{ key: "amenity", value: "hospital" }], [{ key: "healthcare", value: "hospital" }]], searchTerms: [{ ar: "مستشفى", en: "hospital" }], importKeywords: ["sjukhus", "klinik", "vårdcentral", "hospital", "clinic", "مستشفى", "مستشفي", "مستوصف", "medical center", "medical centre", "hospitals", "clinics"] },
     },
     {
       key: "commercial_building",
       label: { ar: "مبانٍ تجارية", en: "Commercial buildings" },
-      discovery: { osm: [[{ key: "building", value: "commercial|office", regex: true }], [{ key: "office", value: "company" }]], searchTerms: [{ ar: "مجمع تجاري", en: "business center" }], importKeywords: ["kontorshus", "office building", "business center", "مجمع تجاري", "برج"] },
+      discovery: { osm: [[{ key: "building", value: "commercial|office", regex: true }], [{ key: "office", value: "company" }]], searchTerms: [{ ar: "مجمع تجاري", en: "business center" }], importKeywords: ["kontorshus", "office building", "business center", "مجمع تجاري", "برج", "bank", "insurance", "exchange"] },
     },
     {
       key: "education",
@@ -52,7 +52,7 @@ export const solarEnergyPack = definePack({
     {
       key: "retail",
       label: { ar: "مولات ومطاعم وسلاسل تجارية", en: "Malls, restaurants & retail chains" },
-      discovery: { osm: [[{ key: "shop", value: "mall|supermarket|department_store", regex: true }], [{ key: "amenity", value: "restaurant" }]], searchTerms: [{ ar: "مول", en: "mall" }], importKeywords: ["restaurang", "handel", "möbler", "köksinredning", "butik", "restaurant", "retail", "trading", "furniture", "mall", "supermarket", "مطعم", "مول", "تجاري", "اثاث"] },
+      discovery: { osm: [[{ key: "shop", value: "mall|supermarket|department_store", regex: true }], [{ key: "amenity", value: "restaurant" }]], searchTerms: [{ ar: "مول", en: "mall" }], importKeywords: ["restaurang", "handel", "möbler", "köksinredning", "butik", "restaurant", "retail", "trading", "furniture", "mall", "supermarket", "مطعم", "مول", "تجاري", "اثاث", "restaurants", "mobiles", "toys", "pharmac"] },
     },
     {
       key: "real_estate",
@@ -68,7 +68,7 @@ export const solarEnergyPack = definePack({
     {
       key: "channel_partner",
       label: { ar: "مقاولو EPC وكهربائيون وموزعون", en: "EPC contractors, installers & resellers" },
-      discovery: { osm: [[{ key: "shop", value: "electrical|hardware|energy", regex: true }], [{ key: "craft", value: "electrician" }]], searchTerms: [{ ar: "مواد كهربائية", en: "electrical supplies" }], importKeywords: ["el och", "elmaterial", "elinstallat", "solenergi", "solcell", "generator", "kabel", "kablar", "belysning", "installation", "pump", "kyla", "solar", "electric", "electrical", "cable", "lighting", "inverter", "مولد", "كهرباء", "كهربائ", "كابلات", "طاقه شمسيه", "انوار"] },
+      discovery: { osm: [[{ key: "shop", value: "electrical|hardware|energy", regex: true }], [{ key: "craft", value: "electrician" }]], searchTerms: [{ ar: "مواد كهربائية", en: "electrical supplies" }], importKeywords: ["el och", "elmaterial", "elinstallat", "solenergi", "solcell", "generator", "kabel", "kablar", "belysning", "installation", "pump", "kyla", "solar", "electric", "electrical", "cable", "lighting", "inverter", "مولد", "كهرباء", "كهربائ", "كابلات", "طاقه شمسيه", "انوار", "home appliance", "generators", "solar energy", "air condition", "hvac"] },
     },
   ],
   companyFields: [

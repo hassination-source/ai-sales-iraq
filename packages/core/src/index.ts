@@ -9,3 +9,4 @@ export * from "./discovery/osm";
 export * from "./research/extract";
 export * from "./ai/draft";
 export * from "./discovery/google";
+export * from "./leads/xlsx";

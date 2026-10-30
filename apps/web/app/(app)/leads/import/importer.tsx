@@ -2,15 +2,17 @@
 
 import { useState, useTransition } from "react";
 import Link from "next/link";
-import { parseCsv } from "@ais/core";
+import { parseCsv, readXlsxParts } from "@ais/core";
 import { importLeads, previewImport, type Preview } from "./actions";
 
 /** Read CSV or Excel in the browser into rows of text; the server only ever sees plain cell values. */
 async function readRows(f: File): Promise<string[][]> {
   if (/\.xlsx$/i.test(f.name)) {
-    const { default: readXlsxFile } = await import("read-excel-file");
-    const rows = await readXlsxFile(f);
-    return rows.map((r) => r.map((c) => (c === null || c === undefined ? "" : c instanceof Date ? c.toISOString().slice(0, 10) : String(c))));
+    const { unzipSync, strFromU8 } = await import("fflate");
+    const files = unzipSync(new Uint8Array(await f.arrayBuffer()), { filter: (e) => /^xl\/(workbook\.xml|_rels\/workbook\.xml\.rels|sharedStrings\.xml|worksheets\/[^/]+\.xml)$/.test(e.name) });
+    const text = (p: string) => (files[p] ? strFromU8(files[p]!) : undefined);
+    const sheets = Object.fromEntries(Object.keys(files).filter((p) => p.startsWith("xl/worksheets/")).map((p) => [p, text(p)!]));
+    return readXlsxParts({ workbook: text("xl/workbook.xml"), workbookRels: text("xl/_rels/workbook.xml.rels"), sharedStrings: text("xl/sharedStrings.xml"), sheets });
   }
   return parseCsv(await f.text());
 }

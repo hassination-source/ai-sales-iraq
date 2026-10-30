@@ -122,12 +122,27 @@ export function matchSegment(segments: { key: string; discovery: { importKeyword
 
 export function detectColumns(header: string[]): Partial<Record<ImportField, number>> {
   const map: Partial<Record<ImportField, number>> = {};
-  header.forEach((h, i) => {
-    const n = normalizeArabic(h);
-    for (const [field, aliases] of Object.entries(HEADER_ALIASES) as [ImportField, string[]][]) {
-      if (map[field] === undefined && aliases.some((a) => normalizeArabic(a) === n)) map[field] = i;
-    }
-  });
+  const taken = new Set<number>();
+  // exact names first; then a known name followed by a qualifier ("Bransch (katalog)", "Phone (mobile)")
+  for (const exact of [true, false]) {
+    header.forEach((h, i) => {
+      if (taken.has(i)) return;
+      const n = normalizeArabic(String(h ?? ""));
+      if (!n) return;
+      for (const [field, aliases] of Object.entries(HEADER_ALIASES) as [ImportField, string[]][]) {
+        if (map[field] !== undefined) continue;
+        const hit = aliases.some((a) => {
+          const k = normalizeArabic(a);
+          return exact ? n === k : n.startsWith(`${k} `);
+        });
+        if (hit) {
+          map[field] = i;
+          taken.add(i);
+          return;
+        }
+      }
+    });
+  }
   return map;
 }
 
