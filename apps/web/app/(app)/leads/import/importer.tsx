@@ -47,6 +47,7 @@ const ON: Record<string, { ar: string; en: string }> = {
   "name+governorate": { ar: "الاسم والمحافظة", en: "name + governorate" },
   phone: { ar: "الهاتف", en: "phone" },
   website: { ar: "الموقع", en: "website" },
+  email: { ar: "البريد", en: "email" },
 };
 
 export function Importer({ lang, governorates }: { lang: Lang; governorates: Gov[] }) {
@@ -149,7 +150,7 @@ export function Importer({ lang, governorates }: { lang: Lang; governorates: Gov
               {preview.duplicates.map((d) => (
                 <li key={d.row}>
                   {ar ? `صف ${d.row}: ` : `Row ${d.row}: `}<b className="font-medium">{d.name}</b>{ar ? "، " : ", "}
-                  {d.existing ? (ar ? "موجودة مسبقاً" : "already in your leads") : ar ? "مكررة داخل الملف" : "repeated in this file"} ({d.on.map((o) => ON[o]?.[lang] ?? o).join(ar ? "، " : ", ")})
+                  {d.existing ? (ar ? "موجودة مسبقاً لدى الشركة" : "already in the company's leads") : ar ? "مكررة داخل الملف" : "repeated in this file"} ({d.on.map((o) => ON[o]?.[lang] ?? o).join(ar ? "، " : ", ")})
                 </li>
               ))}
             </Block>

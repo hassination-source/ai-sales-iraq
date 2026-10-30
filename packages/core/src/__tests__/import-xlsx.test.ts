@@ -46,3 +46,12 @@ describe("importing an Excel company list", () => {
     expect(prepareImport(rows).ready[0]!.governorate).toBeNull();
   });
 });
+
+describe("no company twice", () => {
+  it("flags the same email address in the file or among existing leads", () => {
+    const rows = [["Företag", "E-post"], ["A Co", "info@a.iq"], ["Noor Trading", "INFO@a.iq"], ["B Co", "b@b.iq"]];
+    const r = prepareImport(rows, [{ id: "x", name_normalized: "zzz", governorate: null, phone: null, website: null, email: "b@b.iq" }]);
+    expect(r.ready.map((l) => l.name)).toEqual(["A Co"]);
+    expect(r.duplicates.map((d) => [d.lead.name, d.matches[0]!.kind, d.matches[0]!.on])).toEqual([["Noor Trading", "file", "email"], ["B Co", "existing", "email"]]);
+  });
+});

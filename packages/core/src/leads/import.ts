@@ -181,11 +181,12 @@ export interface ExistingCompanyKey {
   governorate: string | null;
   phone: string | null;
   website: string | null;
+  email?: string | null;
 }
 
 export interface ImportResult {
   ready: NormalizedLead[];
-  duplicates: { lead: NormalizedLead; matches: { kind: "file" | "existing"; ref: string; on: "name+governorate" | "phone" | "website" }[] }[];
+  duplicates: { lead: NormalizedLead; matches: { kind: "file" | "existing"; ref: string; on: "name+governorate" | "phone" | "website" | "email" }[] }[];
   errors: { row: number; message: string }[];
   columns: Partial<Record<ImportField, number>>;
 }
@@ -216,13 +217,14 @@ export function prepareImport(allRows: string[][], existing: ExistingCompanyKey[
   };
 
   type Index = Map<string, string>;
-  const byNameGov: Index = new Map(), byPhone: Index = new Map(), bySite: Index = new Map();
+  const byNameGov: Index = new Map(), byPhone: Index = new Map(), bySite: Index = new Map(), byEmail: Index = new Map();
   for (const e of existing) {
     byNameGov.set(`${e.name_normalized}|${e.governorate ?? ""}`, e.id);
     if (e.phone) byPhone.set(e.phone, e.id);
     if (e.website) bySite.set(e.website, e.id);
+    if (e.email) byEmail.set(e.email.toLowerCase(), e.id);
   }
-  const fileNameGov: Index = new Map(), filePhone: Index = new Map(), fileSite: Index = new Map();
+  const fileNameGov: Index = new Map(), filePhone: Index = new Map(), fileSite: Index = new Map(), fileEmail: Index = new Map();
 
   body.forEach((r, idx) => {
     if (r.every((c) => !String(c ?? "").trim())) return; // blank line
@@ -274,15 +276,17 @@ export function prepareImport(allRows: string[][], existing: ExistingCompanyKey[
 
     const matches: ImportResult["duplicates"][number]["matches"] = [];
     const ng = `${lead.name_normalized}|${lead.governorate ?? ""}`;
-    const check = (idx: Index, key: string | null, kind: "file" | "existing", on: "name+governorate" | "phone" | "website") => {
+    const check = (idx: Index, key: string | null, kind: "file" | "existing", on: "name+governorate" | "phone" | "website" | "email") => {
       if (key && idx.has(key)) matches.push({ kind, ref: idx.get(key)!, on });
     };
     check(byNameGov, ng, "existing", "name+governorate");
     check(byPhone, phone, "existing", "phone");
     check(bySite, website, "existing", "website");
+    check(byEmail, email, "existing", "email");
     check(fileNameGov, ng, "file", "name+governorate");
     check(filePhone, phone, "file", "phone");
     check(fileSite, website, "file", "website");
+    check(fileEmail, email, "file", "email");
 
     if (matches.length) {
       result.duplicates.push({ lead, matches });
@@ -291,6 +295,7 @@ export function prepareImport(allRows: string[][], existing: ExistingCompanyKey[
     fileNameGov.set(ng, `row ${rowNo}`);
     if (phone) filePhone.set(phone, `row ${rowNo}`);
     if (website) fileSite.set(website, `row ${rowNo}`);
+    if (email) fileEmail.set(email, `row ${rowNo}`);
     result.ready.push(lead);
   });
   return result;

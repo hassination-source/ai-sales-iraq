@@ -2,7 +2,7 @@ import Link from "next/link";
 import { getContext } from "@/lib/tenant";
 import { supabaseServer } from "@/lib/supabase/server";
 import { integrationStatus } from "@/lib/supabase/service";
-import { getLang, fmtDate } from "@/lib/i18n";
+import { getLang, fmtDate, fmtNumber } from "@/lib/i18n";
 import { reviewDraft, rewriteDraft, saveDraft, sendDraft } from "./actions";
 import { whatsappLink } from "@/lib/whatsapp";
 import { SubmitButton } from "@/components/submit-button";
@@ -19,10 +19,32 @@ export default async function ApprovalsPage({ searchParams }: { searchParams: Pr
   const ar = lang === "ar";
   const sb = await supabaseServer();
   const [{ data: drafts }, { data: docs }, { data: recent }] = await Promise.all([
-    sb.from("message_drafts").select("id, subject, body, language, channel, grounding, generated_by, edited, created_at, company:companies(id, name, email, phone, governorate)").eq("tenant_id", ctx.tenant.id).eq("status", "pending_review").order("created_at").limit(30),
+    sb.from("message_drafts").select("id, subject, body, language, channel, grounding, generated_by, edited, created_at, company:companies(id, name, email, phone, governorate, owner_id)").eq("tenant_id", ctx.tenant.id).eq("status", "pending_review").order("created_at").limit(200),
     sb.from("knowledge_docs").select("id, title").eq("tenant_id", ctx.tenant.id),
     sb.from("message_drafts").select("id, status, subject, reviewed_at, to_email, sent_at, send_error, company:companies(name, email)").eq("tenant_id", ctx.tenant.id).in("status", ["approved", "rejected", "sent", "failed"]).order("reviewed_at", { ascending: false }).limit(15),
   ]);
+  // "mine" (default): drafts for my leads and unassigned ones; colleagues' drafts under "all"
+  const showAll = sp.who === "all";
+  type Co = { id: string; name: string; email: string | null; phone: string | null; owner_id: string | null };
+  const allPending = drafts ?? [];
+  const visible = allPending.filter((d) => showAll || [ctx.userId, null].includes((d.company as unknown as Co | null)?.owner_id ?? null)).slice(0, 30);
+  const hiddenCount = allPending.length - allPending.filter((d) => [ctx.userId, null].includes((d.company as unknown as Co | null)?.owner_id ?? null)).length;
+
+  // who already contacted these customers (email sent/approved, or WhatsApp), so nobody writes twice
+  const companyIds = visible.map((d) => (d.company as unknown as Co | null)?.id).filter((x): x is string => !!x);
+  const emails = visible.map((d) => (d.company as unknown as Co | null)?.email?.toLowerCase()).filter((x): x is string => !!x);
+  const [{ data: prior }, { data: waLog }] = await Promise.all([
+    emails.length ? sb.from("message_drafts").select("id, status, to_email, reviewed_by, reviewed_at, sent_at").eq("tenant_id", ctx.tenant.id).in("status", ["approved", "sent"]).in("to_email", emails) : Promise.resolve({ data: [] as { id: string; status: string; to_email: string | null; reviewed_by: string | null; reviewed_at: string | null; sent_at: string | null }[] }),
+    companyIds.length ? sb.from("activities").select("company_id, actor_id, occurred_at").eq("tenant_id", ctx.tenant.id).eq("type", "message.whatsapp").in("company_id", companyIds) : Promise.resolve({ data: [] as { company_id: string; actor_id: string | null; occurred_at: string }[] }),
+  ]);
+  const who = (id: string | null) => (id === ctx.userId ? (ar ? "أنت" : "you") : ar ? "زميل" : "a colleague");
+  const contactNote = (c: Co | null): string | null => {
+    if (!c) return null;
+    const notes: string[] = [];
+    for (const p of prior ?? []) if (c.email && p.to_email === c.email.toLowerCase()) notes.push(ar ? `بريد ${p.status === "sent" ? "أُرسل" : "موافق عليه"} من ${who(p.reviewed_by)}، ${fmtDate(lang, p.sent_at ?? p.reviewed_at)}` : `email ${p.status === "sent" ? "sent" : "approved"} by ${who(p.reviewed_by)}, ${fmtDate(lang, p.sent_at ?? p.reviewed_at)}`);
+    for (const w of waLog ?? []) if (w.company_id === c.id) notes.push(ar ? `واتساب من ${who(w.actor_id)}، ${fmtDate(lang, w.occurred_at)}` : `WhatsApp by ${who(w.actor_id)}, ${fmtDate(lang, w.occurred_at)}`);
+    return notes.length ? notes.join(ar ? "؛ " : "; ") : null;
+  };
   const { data: agentSettings } = await sb.from("agent_settings").select("signature").eq("tenant_id", ctx.tenant.id).maybeSingle();
   const docTitle = new Map((docs ?? []).map((d) => [`kb:${d.id}`, d.title]));
   const canReview = ["owner", "admin", "manager"].includes(ctx.role);
@@ -36,6 +58,7 @@ export default async function ApprovalsPage({ searchParams }: { searchParams: Pr
   };
   const errors: Record<string, [string, string]> = { already_reviewed: ["هذه الرسالة رُوجعت مسبقاً.", "This message was already reviewed."], ai_off: ["الكتابة بالذكاء الاصطناعي غير مفعّلة.", "AI writing isn't switched on."], invalid: ["العنوان والنص مطلوبان.", "Subject and text are required."], role: ["فقط المدير أو المسؤول يمكنه الموافقة.", "Only a manager or admin can approve."] };
   const skipNotes: Record<string, [string, string]> = {
+    already_contacted: ["لم تُرسل: زميل أرسل مسبقاً رسالة إلى هذا العنوان.", "Not sent: a colleague already sent a message to this address."],
     no_email: ["لا يوجد بريد إلكتروني لهذه الشركة، لذلك لم تُرسل. تواصل معهم هاتفياً أو عبر واتساب.", "This company has no email address, so nothing was sent. Reach them by phone or WhatsApp."],
     suppressed: ["هذا العنوان طلب عدم مراسلته، لذلك لم تُرسل.", "This address asked not to be contacted, so nothing was sent."],
   };
@@ -55,7 +78,12 @@ export default async function ApprovalsPage({ searchParams }: { searchParams: Pr
       {sp.send_error && <p className="note-error">{ar ? "تعذّر الإرسال: " : "Couldn't send: "}{sp.send_error}</p>}
       {sp.error && <p className="note-error">{errors[sp.error]?.[ar ? 0 : 1] ?? sp.error}</p>}
 
-      {(drafts ?? []).length === 0 ? (
+      <nav className="flex gap-2 text-sm">
+        <Link href="/approvals" className={showAll ? "btn-quiet" : "btn-primary"}>{ar ? "رسائلي" : "Mine"}</Link>
+        <Link href="/approvals?who=all" className={showAll ? "btn-primary" : "btn-quiet"}>{ar ? `كل الشركة${hiddenCount ? ` (+${fmtNumber(lang, hiddenCount)})` : ""}` : `Whole company${hiddenCount ? ` (+${hiddenCount})` : ""}`}</Link>
+      </nav>
+
+      {visible.length === 0 ? (
         <div className="rounded-lg border border-dashed border-line bg-surface p-10 text-center">
           <p className="font-medium">{ar ? "لا توجد رسائل بانتظارك" : "Nothing waiting for you"}</p>
           <p className="mt-1 text-sm text-muted">{ar ? "عندما يكتب الوكيل رسالة ستظهر هنا." : "When the agent writes a message it shows up here."}</p>
@@ -63,9 +91,10 @@ export default async function ApprovalsPage({ searchParams }: { searchParams: Pr
         </div>
       ) : (
         <ul className="space-y-6">
-          {drafts!.map((d) => {
+          {visible.map((d) => {
             const c = d.company as unknown as { id: string; name: string; email: string | null; phone: string | null } | null;
-            const wa = whatsappLink(c?.phone, d.body, agentSettings?.signature);
+            const wa = whatsappLink(c?.phone) ? `/wa/${c!.id}?draft=${d.id}` : null;
+            const already = contactNote(c as Co | null);
             const g = (d.grounding ?? {}) as Grounding;
             const rtl = d.language.startsWith("ar");
             return (
@@ -78,6 +107,11 @@ export default async function ApprovalsPage({ searchParams }: { searchParams: Pr
                   </p>
                   <p className="text-xs text-muted">{ar ? "كتبها الوكيل" : "Written by the agent"}, {fmtDate(lang, d.created_at)}{d.edited ? (ar ? "، معدّلة" : ", edited") : ""}</p>
                 </div>
+                {already && (
+                  <p className="note-error mx-5 mt-4">
+                    {ar ? "تم التواصل مع هذا العميل مسبقاً: " : "This customer was already contacted: "}{already}
+                  </p>
+                )}
                 <form className="space-y-3 px-5 py-4">
                   <div>
                     <label className="label" htmlFor={`s-${d.id}`}>{ar ? "العنوان" : "Subject"}</label>

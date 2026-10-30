@@ -157,7 +157,7 @@ export async function sendViaResend(
 
 export type SendOutcome =
   | { status: "sent"; to: string }
-  | { status: "skipped"; reason: "not_approved" | "no_email" | "suppressed" | "not_email" }
+  | { status: "skipped"; reason: "not_approved" | "no_email" | "suppressed" | "not_email" | "already_contacted" }
   | { status: "failed"; error: string; retryable: boolean };
 
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[a-z]{2,}$/i;
@@ -193,6 +193,10 @@ export async function sendApprovedDraft(db: Db, cfg: EmailConfig, tenantId: stri
 
   const { data: suppressed } = await db.from("email_suppressions").select("email").eq("tenant_id", tenantId).eq("email", to).maybeSingle();
   if (suppressed) return { status: "skipped", reason: "suppressed" };
+
+  // the same address never gets two first messages, whichever colleague approved them
+  const { data: earlier } = await db.from("message_drafts").select("id").eq("tenant_id", tenantId).eq("to_email", to).eq("status", "sent").neq("id", d.id).limit(1);
+  if (earlier?.length) return { status: "skipped", reason: "already_contacted" };
 
   if (!(await checkDomain(to.split("@")[1]!))) {
     const error = `${to.split("@")[1]} does not receive email (no mail server)`;

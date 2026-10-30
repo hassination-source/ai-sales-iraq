@@ -26,7 +26,7 @@ export default async function AgentHome({ searchParams }: { searchParams: Promis
     sb.from("message_drafts").select("id", { count: "exact", head: true }).eq("tenant_id", tid).eq("status", "pending_review"),
     sb.from("knowledge_docs").select("id", { count: "exact", head: true }).eq("tenant_id", tid).eq("status", "active"),
     sb.from("agent_settings").select("paused").eq("tenant_id", tid).maybeSingle(),
-    sb.from("companies").select("id", { count: "exact", head: true }).eq("tenant_id", tid).in("source_type", ["csv_import", "xlsx_import", "manual"]).is("mission_id", null),
+    sb.from("companies").select("id", { count: "exact", head: true }).eq("tenant_id", tid).in("source_type", ["csv_import", "xlsx_import", "manual"]).is("mission_id", null).eq("owner_id", ctx.userId),
   ]);
   const importedCount = imported.count ?? 0;
 

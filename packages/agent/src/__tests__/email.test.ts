@@ -131,3 +131,13 @@ describe("dead domains", () => {
     expect(db.rows("message_drafts")[0]).toMatchObject({ status: "failed", send_error: expect.stringContaining("no mail server") });
   });
 });
+
+describe("one first message per address", () => {
+  it("doesn't send when a colleague's message to the same address already went out", async () => {
+    const db = setup();
+    db.tables.message_drafts.push({ id: "d0", tenant_id: T, company_id: "other", status: "sent", to_email: "info@baghdad-factory.com" });
+    const { f, calls } = resend();
+    expect(await sendApprovedDraft(db, cfg, T, "d1", f, ok)).toEqual({ status: "skipped", reason: "already_contacted" });
+    expect(calls).toHaveLength(0);
+  });
+});

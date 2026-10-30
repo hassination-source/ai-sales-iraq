@@ -106,7 +106,7 @@ export default async function LeadPage({ params, searchParams }: { params: Promi
 
           {whatsappLink(c.phone) && (
             <p className="mt-4">
-              <a href={whatsappLink(c.phone)!} target="_blank" rel="noreferrer" className="btn-quiet">{ar ? "مراسلة عبر واتساب" : "Message on WhatsApp"}</a>
+              <a href={`/wa/${c.id}`} target="_blank" rel="noreferrer" className="btn-quiet">{ar ? "مراسلة عبر واتساب" : "Message on WhatsApp"}</a>
             </p>
           )}
 

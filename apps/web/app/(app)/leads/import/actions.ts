@@ -32,7 +32,7 @@ async function prepare(input: unknown, defaultGovernorate: unknown): Promise<{ r
   const rows = parsed.data;
   const ctx = await getContext();
   const sb = await supabaseServer();
-  const { data: existing, error } = await sb.from("companies").select("id, name_normalized, governorate, phone, website").eq("tenant_id", ctx.tenant.id).limit(50_000);
+  const { data: existing, error } = await sb.from("companies").select("id, name_normalized, governorate, phone, website, email").eq("tenant_id", ctx.tenant.id).limit(50_000);
   if (error) return { ok: false, message: error.message };
   const result = prepareImport(rows, existing ?? [], undefined, { defaultGovernorate: gov.success ? gov.data : null });
   return { result, total: result.ready.length + result.duplicates.length + result.errors.filter((e) => e.row > 1).length };

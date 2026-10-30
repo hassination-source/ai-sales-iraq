@@ -421,3 +421,24 @@ describe("missions over imported leads", () => {
     expect(db.rows("agent_events").map((e) => e.type)).toContain("leads.claimed");
   });
 });
+
+describe("colleagues in one company", () => {
+  it("an imported-list mission takes only its creator's leads and skips anyone already contacted", async () => {
+    const { db, mission } = setup({ source: "leads", segments: ["hotel"], governorates: ["IQ-BG"], limit: 10 });
+    db.tables.knowledge_docs = [{ id: "doc-1", tenant_id: T, title: "Products", body: "Sigenergy SigenStor", status: "active", updated_at: "1" }];
+    const co = (id: string, owner: string, email: string) => ({ id, tenant_id: T, name: id, governorate: "IQ-BG", source_type: "xlsx_import", mission_id: null, owner_id: owner, email, fit_score: 50, attributes: { segment: "hotel" } });
+    db.tables.companies = [
+      co("ali-1", "ali", "a1@x.iq"),
+      co("ali-2", "ali", "shared@x.iq"), // same address as a company Hassan already wrote to
+      co("ali-3", "ali", "a3@x.iq"), // Hassan messaged them on WhatsApp
+      co("hassan-1", "hassan", "h1@x.iq"),
+      co("hassan-old", "hassan", "shared@x.iq"),
+    ];
+    db.tables.message_drafts = [{ id: "d0", tenant_id: T, company_id: "hassan-old", status: "sent", to_email: "shared@x.iq" }];
+    db.tables.activities = [{ tenant_id: T, type: "message.whatsapp", company_id: "ali-3" }];
+    const { f } = fakeFetch({ ai: { content: [{ type: "tool_use", name: "submit_draft", input: { decision: "write", skip_reason: null, subject: "s", body: "b", sources_used: ["kb:doc-1"], hypotheses: [] } }], usage: { input_tokens: 10, output_tokens: 10 } } });
+    await runMission({ ...mission, created_by: "ali" }, { db, fetch: f, ai, deadline: far() });
+    expect(db.rows("companies").filter((c) => c.mission_id === "m1").map((c) => c.id).sort()).toEqual(["ali-1", "ali-2", "ali-3"]);
+    expect(db.rows("message_drafts").filter((d) => d.id !== "d0").map((d) => d.company_id)).toEqual(["ali-1"]);
+  });
+});

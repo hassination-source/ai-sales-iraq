@@ -7,7 +7,7 @@ import { ScoreBar } from "@/components/score-bar";
 
 const PAGE = 50;
 
-export default async function LeadsPage({ searchParams }: { searchParams: Promise<{ q?: string; gov?: string; page?: string }> }) {
+export default async function LeadsPage({ searchParams }: { searchParams: Promise<{ q?: string; gov?: string; page?: string; who?: string }> }) {
   const ctx = await getContext();
   const lang = await getLang();
   const ar = lang === "ar";
@@ -22,6 +22,9 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
     .order("fit_score", { ascending: false, nullsFirst: false })
     .order("created_at", { ascending: false })
     .range((page - 1) * PAGE, page * PAGE - 1);
+  // "mine": leads I imported or found, plus unassigned ones; colleagues' lists only under "all"
+  const all = sp.who === "all";
+  if (!all) query = query.or(`owner_id.eq.${ctx.userId},owner_id.is.null`);
   if (sp.gov) query = query.eq("governorate", sp.gov);
   if (sp.q) query = query.ilike("name", `%${sp.q.replace(/[%_,]/g, "")}%`);
   const { data: rows, count, error } = await query;
@@ -32,7 +35,7 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
     return g ? (ar ? g.ar : g.en) : "—";
   };
   const pages = Math.max(1, Math.ceil((count ?? 0) / PAGE));
-  const qs = (p: number) => `?${new URLSearchParams({ ...(sp.q ? { q: sp.q } : {}), ...(sp.gov ? { gov: sp.gov } : {}), page: String(p) })}`;
+  const qs = (p: number) => `?${new URLSearchParams({ ...(sp.q ? { q: sp.q } : {}), ...(sp.gov ? { gov: sp.gov } : {}), ...(all ? { who: "all" } : {}), page: String(p) })}`;
 
   return (
     <div className="space-y-6">
@@ -51,6 +54,10 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
         <select className="field max-w-52" name="gov" defaultValue={sp.gov ?? ""} aria-label={ar ? "المحافظة" : "Governorate"}>
           <option value="">{ar ? "كل المحافظات" : "All governorates"}</option>
           {GOVERNORATES.map((g) => <option key={g.code} value={g.code}>{ar ? g.ar : g.en}</option>)}
+        </select>
+        <select className="field max-w-44" name="who" defaultValue={all ? "all" : "mine"} aria-label={ar ? "عملاء من" : "Whose leads"}>
+          <option value="mine">{ar ? "عملائي" : "My leads"}</option>
+          <option value="all">{ar ? "كل عملاء الشركة" : "All the company's leads"}</option>
         </select>
         <button className="btn-quiet">{ar ? "تصفية" : "Filter"}</button>
       </form>

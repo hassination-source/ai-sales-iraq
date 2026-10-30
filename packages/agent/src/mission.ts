@@ -30,6 +30,8 @@ export interface Mission {
   params: { segments: string[]; governorates: string[]; limit: number; write_drafts?: boolean; source?: "discover" | "leads" };
   status: string;
   phase: "discover" | "research" | "draft" | "finished";
+  /** The colleague who started it: imported-list missions work only on their own leads, and new finds belong to them. */
+  created_by?: string | null;
   progress: Progress;
   attempts: number;
 }
@@ -153,6 +155,25 @@ type Ev = (type: string, data?: Record<string, unknown>, level?: string, extra?:
 /* ------------------------------------------------------------------ discover */
 type DiscoverResult = { kind: "done" } | { kind: "timeup" } | { kind: "wait"; ms: number };
 
+/**
+ * Everyone the company is already talking to: email addresses with a draft that wasn't rejected
+ * (pending, approved, sent), and companies messaged on WhatsApp. Shared by all colleagues.
+ */
+export async function contactedKeys(db: Db, tenantId: string): Promise<{ emails: Set<string>; companies: Set<string> }> {
+  const [{ data: drafts }, { data: wa }] = await Promise.all([
+    db.from("message_drafts").select("company_id, to_email, company:companies(email)").eq("tenant_id", tenantId).in("status", ["pending_review", "approved", "sent"]),
+    db.from("activities").select("company_id").eq("tenant_id", tenantId).eq("type", "message.whatsapp"),
+  ]);
+  const emails = new Set<string>();
+  const companies = new Set<string>();
+  for (const d of (drafts ?? []) as { company_id: string | null; to_email: string | null; company?: { email: string | null } | null }[]) {
+    if (d.to_email) emails.add(d.to_email.toLowerCase());
+    if (d.company?.email) emails.add(d.company.email.toLowerCase());
+  }
+  for (const a of (wa ?? []) as { company_id: string | null }[]) if (a.company_id) companies.add(a.company_id);
+  return { emails, companies };
+}
+
 /** Pseudo-segment for imported companies whose category didn't map to any segment. */
 export const UNSEGMENTED = "_other";
 const IMPORTED = ["csv_import", "xlsx_import", "manual"];
@@ -170,6 +191,8 @@ async function claimLeads(m: Mission, p: Progress, deps: Deps, ev: Ev): Promise<
     .is("mission_id", null)
     .in("source_type", IMPORTED)
     .in("governorate", m.params.governorates);
+  // "my imported list": each colleague's agent works through the lists that colleague imported
+  if (m.created_by) q = q.eq("owner_id", m.created_by);
   if (m.params.write_drafts !== false) q = q.not("email", "is", null);
   const { data } = await q.order("fit_score", { ascending: false }).limit(5000);
   const wanted = new Set(m.params.segments);
@@ -359,6 +382,7 @@ async function insertCompanies(db: Db, m: Mission, cfg: EffectiveConfig, segKey:
     return {
       tenant_id: m.tenant_id,
       mission_id: m.id,
+      owner_id: m.created_by ?? null,
       name: c.name.slice(0, 300),
       name_normalized: c.name_normalized,
       governorate: c.governorate,
@@ -478,11 +502,12 @@ async function draft(m: Mission, cfg: EffectiveConfig, p: Progress, deps: Deps, 
       return "limit";
     }
 
-    const [{ data: candidates }, { data: drafted }, { data: attempted }, { data: optedOut }] = await Promise.all([
+    const [{ data: candidates }, { data: drafted }, { data: attempted }, { data: optedOut }, contacted] = await Promise.all([
       db.from("companies").select("id, name, governorate, email, source_url, source_type, industry, description, attributes").eq("tenant_id", m.tenant_id).eq("mission_id", m.id).order("fit_score", { ascending: false }).limit(200),
       db.from("message_drafts").select("company_id").eq("tenant_id", m.tenant_id).not("company_id", "is", null),
       db.from("agent_events").select("company_id").eq("tenant_id", m.tenant_id).eq("mission_id", m.id).in("type", ["draft.skipped", "draft.invalid"]),
       db.from("email_suppressions").select("email").eq("tenant_id", m.tenant_id),
+      contactedKeys(db, m.tenant_id),
     ]);
     const suppressed = new Set((optedOut ?? []).map((r: { email: string }) => r.email));
     const skip = new Set([...(drafted ?? []), ...(attempted ?? [])].map((r: { company_id: string }) => r.company_id));
@@ -496,7 +521,8 @@ async function draft(m: Mission, cfg: EffectiveConfig, p: Progress, deps: Deps, 
     const next = (candidates ?? []).find((c: { id: string; email: string | null }) => {
       if (skip.has(c.id)) return false;
       const emails = [c.email, ...(((researchBy.get(c.id) as { emails?: string[] } | undefined)?.emails) ?? [])].filter((e): e is string => !!e).map((e) => e.toLowerCase());
-      return emails.length > 0 && !emails.some((e) => suppressed.has(e));
+      // never a second message to an address or company a colleague already has in hand
+      return emails.length > 0 && !emails.some((e) => suppressed.has(e) || contacted.emails.has(e)) && !contacted.companies.has(c.id);
     });
     if (!next) return "done";
 
