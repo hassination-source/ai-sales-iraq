@@ -121,6 +121,13 @@ describe("agent missions", () => {
     await expect(asUser(db, OTHER, (q) => q("insert into email_suppressions(tenant_id, email, reason) values ($1,'a@b.iq','manual')", [tenant]))).rejects.toThrow(/row-level security/);
   });
 
+  it("an empty tenant can be deleted (its audit trail goes with it)", async () => {
+    const t = await asUser(db, OTHER, async (q) => (await q<{ id: string }>("select app.create_tenant('Spare','spare-x','solar-energy',1,$1::jsonb) as id", [STAGES]))[0]!.id, { commit: true });
+    await asWorker(() => db.query("delete from tenants where id=$1", [t]));
+    expect((await db.query("select 1 from tenants where id=$1", [t])).rows).toHaveLength(0);
+    expect((await db.query("select 1 from audit_log where tenant_id=$1", [t])).rows).toHaveLength(0);
+  });
+
   it("the cron schedule is registered", async () => {
     const j = await db.query<{ schedule: string }>("select schedule from cron.jobs where name='agent-worker-tick'");
     expect(j.rows[0]!.schedule).toBe("* * * * *");
