@@ -4,7 +4,7 @@ import { z } from "zod";
 import { getContext } from "@/lib/tenant";
 import { supabaseServer } from "@/lib/supabase/server";
 import { integrationStatus, supabaseService } from "@/lib/supabase/service";
-import { composeEmailHtml, composeEmailText, senderFor, sendViaResend, unsubscribeToken } from "@ais/agent";
+import { composeEmailHtml, composeEmailText, senderFor, senderProfile, sendViaResend, unsubscribeToken } from "@ais/agent";
 import { emailConfig } from "@/lib/email";
 import { getLang } from "@/lib/i18n";
 
@@ -30,6 +30,28 @@ async function saveSettings(formData: FormData) {
   redirect("/settings?saved=1");
 }
 
+/** Each colleague's own sender name, signature and address. Anyone in the company may edit their own. */
+async function saveProfile(formData: FormData) {
+  "use server";
+  const ctx = await getContext();
+  const parsed = z
+    .object({
+      sender_name: z.string().trim().max(120),
+      signature: z.string().trim().max(600),
+      from_email: z.union([z.literal(""), z.string().trim().toLowerCase().email().max(200)]),
+    })
+    .safeParse({ sender_name: formData.get("sender_name") ?? "", signature: String(formData.get("signature") ?? "").replace(/\r\n/g, "\n"), from_email: String(formData.get("from_email") ?? "").trim() });
+  if (!parsed.success) redirect("/settings?error=invalid");
+  const sb = await supabaseServer();
+  const { error } = await sb.from("member_profiles").upsert(
+    { tenant_id: ctx.tenant.id, user_id: ctx.userId, sender_name: parsed.data.sender_name || null, signature: parsed.data.signature || null, from_email: parsed.data.from_email || null, updated_at: new Date().toISOString() },
+    { onConflict: "tenant_id,user_id" },
+  );
+  if (error) redirect(`/settings?error=${encodeURIComponent(error.message)}`);
+  revalidatePath("/settings");
+  redirect("/settings?saved=profile");
+}
+
 /** Sends a sample outreach email (with the saved signature) to the signed-in user, to check delivery end to end. */
 async function sendTestEmail() {
   "use server";
@@ -38,7 +60,11 @@ async function sendTestEmail() {
   const cfg = emailConfig();
   const db = supabaseService();
   if (!cfg || !db || !ctx.email) redirect("/settings?test=not_configured");
-  const { data: s } = await db.from("agent_settings").select("signature, from_email, draft_language").eq("tenant_id", ctx.tenant.id).maybeSingle();
+  const [{ data: company }, me] = await Promise.all([
+    db.from("agent_settings").select("draft_language").eq("tenant_id", ctx.tenant.id).maybeSingle(),
+    senderProfile(db, ctx.tenant.id, ctx.userId),
+  ]);
+  const s = { draft_language: company?.draft_language, signature: me.signature, from_email: me.from_email };
   const ar = (s?.draft_language ?? "ar-IQ").startsWith("ar");
   const main = ar
     ? "هذه رسالة تجريبية من وكيل المبيعات للتأكد من أن الإرسال يعمل. الرسائل الحقيقية ستصل بهذا الشكل."
@@ -63,7 +89,10 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
   const lang = await getLang();
   const ar = lang === "ar";
   const sb = await supabaseServer();
-  const { data: s } = await sb.from("agent_settings").select("*").eq("tenant_id", ctx.tenant.id).maybeSingle();
+  const [{ data: s }, { data: me }] = await Promise.all([
+    sb.from("agent_settings").select("*").eq("tenant_id", ctx.tenant.id).maybeSingle(),
+    sb.from("member_profiles").select("sender_name, signature, from_email").eq("tenant_id", ctx.tenant.id).eq("user_id", ctx.userId).maybeSingle(),
+  ]);
   const st = integrationStatus();
   const canEdit = ["owner", "admin"].includes(ctx.role);
 
@@ -106,6 +135,32 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
       {sp.error && <p className="note-error">{sp.error === "role" ? (ar ? "فقط المالك أو المسؤول." : "Owner or admin only.") : sp.error === "invalid" ? (ar ? "تحقق من القيم." : "Check the values.") : sp.error}</p>}
 
       <section>
+        <h2 className="text-lg font-semibold">{ar ? "ملفي" : "My profile"}</h2>
+        <p className="mt-1 text-sm text-muted">
+          {ar ? `الرسائل التي يكتبها الوكيل لك تُوقّع وتُرسل بهذه البيانات (${ctx.email ?? ""}). الحقول الفارغة تأخذ قيمة الشركة.` : `Messages the agent writes for you are signed and sent with these details (${ctx.email ?? ""}). Empty fields use the company's.`}
+        </p>
+        <form action={saveProfile} className="mt-3 space-y-4 rounded-lg border border-line bg-surface p-5">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <label className="label" htmlFor="p_sender_name">{ar ? "اسمي كمرسل" : "My sender name"}</label>
+              <input className="field" id="p_sender_name" name="sender_name" maxLength={120} defaultValue={me?.sender_name ?? ""} placeholder={ar ? "مثال: م. علي" : "e.g. Eng Ali"} />
+            </div>
+            <div>
+              <label className="label" htmlFor="p_from_email">{ar ? "أرسل من بريدي" : "Send from my address"}</label>
+              <input className="field" id="p_from_email" name="from_email" type="email" dir="ltr" maxLength={200} defaultValue={me?.from_email ?? ""} placeholder={s?.from_email || "sales@sigensol.com"} />
+              <p className="mt-1 text-xs text-muted">{ar ? "يجب أن يكون نطاقه مُفعّلاً في Resend." : "Its domain must be verified in Resend."}</p>
+            </div>
+          </div>
+          <div>
+            <label className="label" htmlFor="p_signature">{ar ? "توقيعي" : "My signature"}</label>
+            <textarea className="field min-h-36 leading-relaxed" id="p_signature" name="signature" dir="auto" maxLength={600} defaultValue={me?.signature ?? ""} placeholder={"م. علي\nSigen Solar Energy\nموزع Sigenergy في العراق\n+964 …\nwww.sigensol.com | www.sigenergy.com"} />
+            <p className="mt-1 text-xs text-muted">{ar ? "يُضاف كما هو إلى نهاية رسائلك. كل سطر يظهر بلغته واتجاهه." : "Added exactly as written to the end of your messages. Each line keeps its own language direction."}</p>
+          </div>
+          <button className="btn-primary">{ar ? "احفظ ملفي" : "Save my profile"}</button>
+        </form>
+      </section>
+
+      <section>
         <h2 className="text-lg font-semibold">{ar ? "الوكيل" : "Agent"}</h2>
         <form action={saveSettings} className="mt-3 space-y-4 rounded-lg border border-line bg-surface p-5">
           <fieldset disabled={!canEdit} className="space-y-4">
@@ -127,19 +182,19 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
                 </select>
               </div>
               <div>
-                <label className="label" htmlFor="sender_name">{ar ? "اسم المرسل" : "Sender name"}</label>
+                <label className="label" htmlFor="sender_name">{ar ? "اسم المرسل (افتراضي للشركة)" : "Sender name (company default)"}</label>
                 <input className="field" id="sender_name" name="sender_name" defaultValue={s?.sender_name ?? ""} placeholder={ar ? "مثال: حسن" : "e.g. Hassan"} />
               </div>
             </div>
             <div>
-              <label className="label" htmlFor="from_email">{ar ? "عنوان الإرسال" : "Send from"}</label>
+              <label className="label" htmlFor="from_email">{ar ? "عنوان الإرسال (افتراضي للشركة)" : "Send from (company default)"}</label>
               <input className="field" id="from_email" name="from_email" type="email" dir="ltr" defaultValue={s?.from_email ?? ""} placeholder="sales@sigensol.com" />
               <p className="mt-1 text-xs text-muted">{ar ? "يجب أن يكون نطاقه مُفعّلاً في Resend." : "Its domain must be verified in Resend."}</p>
             </div>
             <div>
-              <label className="label" htmlFor="signature">{ar ? "التوقيع الثابت" : "Fixed signature"}</label>
+              <label className="label" htmlFor="signature">{ar ? "التوقيع (افتراضي للشركة)" : "Signature (company default)"}</label>
               <textarea
-                className="field min-h-28 font-mono text-sm"
+                className="field min-h-28 leading-relaxed" dir="auto"
                 id="signature"
                 name="signature"
                 maxLength={600}

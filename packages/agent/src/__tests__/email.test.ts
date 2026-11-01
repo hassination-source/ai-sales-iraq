@@ -135,9 +135,20 @@ describe("dead domains", () => {
 describe("one first message per address", () => {
   it("doesn't send when a colleague's message to the same address already went out", async () => {
     const db = setup();
-    db.tables.message_drafts.push({ id: "d0", tenant_id: T, company_id: "other", status: "sent", to_email: "info@baghdad-factory.com" });
+    db.tables.message_drafts!.push({ id: "d0", tenant_id: T, company_id: "other", status: "sent", to_email: "info@baghdad-factory.com" });
     const { f, calls } = resend();
     expect(await sendApprovedDraft(db, cfg, T, "d1", f, ok)).toEqual({ status: "skipped", reason: "already_contacted" });
     expect(calls).toHaveLength(0);
+  });
+});
+
+describe("sender address per colleague", () => {
+  it("sends from the profile address of the colleague the draft was written for", async () => {
+    const db = setup({ sender_user_id: "ali" });
+    db.tables.agent_settings = [{ tenant_id: T, from_email: "sales@sigensol.com", signature: null }];
+    db.tables.member_profiles = [{ tenant_id: T, user_id: "ali", from_email: "ali@sigensol.com", signature: "م. علي", sender_name: "Ali" }];
+    const { f, calls } = resend();
+    await sendApprovedDraft(db, cfg, T, "d1", f, ok);
+    expect(calls[0]!.body.from).toBe("Sigen Solar Energy <ali@sigensol.com>");
   });
 });

@@ -442,3 +442,22 @@ describe("colleagues in one company", () => {
     expect(db.rows("message_drafts").filter((d) => d.id !== "d0").map((d) => d.company_id)).toEqual(["ali-1"]);
   });
 });
+
+describe("each colleague signs as themselves", () => {
+  it("a mission's drafts carry its creator's signature, falling back to the company's", async () => {
+    const { db, mission } = setup({ source: "leads", segments: ["hotel"], governorates: ["IQ-BG"], limit: 5 });
+    db.tables.knowledge_docs = [{ id: "doc-1", tenant_id: T, title: "Products", body: "Sigenergy SigenStor", status: "active", updated_at: "1" }];
+    db.tables.agent_settings = [{ tenant_id: T, daily_draft_limit: 20, draft_language: "ar-IQ", sender_name: "Eng Hassan", signature: "م. حسن\nSigen Solar Energy" }];
+    db.tables.member_profiles = [{ tenant_id: T, user_id: "ali", sender_name: "Eng Ali", signature: "م. علي\nSigen Solar Energy", from_email: null }];
+    db.tables.companies = [{ id: "c1", tenant_id: T, name: "c1", governorate: "IQ-BG", source_type: "xlsx_import", mission_id: null, owner_id: "ali", email: "c1@x.iq", fit_score: 50, attributes: { segment: "hotel" } }];
+    let system = "";
+    const { f } = fakeFetch({ ai: { content: [{ type: "tool_use", name: "submit_draft", input: { decision: "write", skip_reason: null, subject: "s", body: "مرحبا", sources_used: ["kb:doc-1"], hypotheses: [] } }], usage: { input_tokens: 10, output_tokens: 10 } } });
+    const g = (async (u: RequestInfo | URL, init?: RequestInit) => {
+      if (String(u).includes("anthropic")) system = JSON.parse(String(init?.body)).system;
+      return f(u, init);
+    }) as typeof fetch;
+    await runMission({ ...mission, created_by: "ali" }, { db, fetch: g, ai, deadline: far() });
+    expect(db.rows("message_drafts")[0]).toMatchObject({ body: "مرحبا\n\nم. علي\nSigen Solar Energy", sender_user_id: "ali" });
+    expect(system).toContain("fixed signature");
+  });
+});

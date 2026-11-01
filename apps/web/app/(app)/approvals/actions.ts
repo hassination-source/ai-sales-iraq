@@ -91,7 +91,7 @@ export async function rewriteDraft(draftId: string, formData: FormData) {
   if (!db || !apiKey) back("error=ai_off");
   const ai = { apiKey: apiKey!, workspaceId: process.env.ANTHROPIC_WORKSPACE_ID || undefined, model: process.env.AI_MODEL ?? "claude-sonnet-5-5", priceIn: Number(process.env.AI_PRICE_IN ?? 3), priceOut: Number(process.env.AI_PRICE_OUT ?? 15) };
   const feedback = String(formData.get("feedback") ?? "");
-  const r = await agentRewrite(db!, ai, ctx.tenant.id, draftId, feedback);
+  const r = await agentRewrite(db!, ai, ctx.tenant.id, draftId, feedback, fetch, ctx.userId);
   if (r.status === "failed") back(`error=${encodeURIComponent(r.error)}`);
   if (r.status === "skipped") back(`error=${encodeURIComponent(r.reason || "skipped")}`);
   // the old draft is closed by the signed-in reviewer, so the audit log shows who asked for the rewrite

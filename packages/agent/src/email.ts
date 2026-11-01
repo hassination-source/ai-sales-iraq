@@ -3,6 +3,7 @@ import { resolveMx } from "node:dns/promises";
 import type { Fetch } from "./http";
 import type { Db } from "./mission";
 import { redactSecrets } from "./ai";
+import { senderProfile } from "./sender";
 
 export interface EmailConfig {
   /** Resend API key. */
@@ -179,13 +180,14 @@ export const hasMailServer: DomainCheck = async (domain) => {
  * Idempotent: Resend dedupes on the draft id, and the status only moves approved → sent/failed.
  */
 export async function sendApprovedDraft(db: Db, cfg: EmailConfig, tenantId: string, draftId: string, f: Fetch = fetch, checkDomain: DomainCheck = hasMailServer): Promise<SendOutcome> {
-  const { data: d } = await db.from("message_drafts").select("id, status, channel, subject, body, language, company_id").eq("id", draftId).eq("tenant_id", tenantId).maybeSingle();
+  const { data: d } = await db.from("message_drafts").select("id, status, channel, subject, body, language, company_id, sender_user_id").eq("id", draftId).eq("tenant_id", tenantId).maybeSingle();
   if (!d || d.status !== "approved") return { status: "skipped", reason: "not_approved" };
   if (d.channel !== "email") return { status: "skipped", reason: "not_email" };
 
-  const [{ data: company }, { data: settings }, { data: tenant }] = await Promise.all([
+  const [{ data: company }, settings, { data: tenant }] = await Promise.all([
     d.company_id ? db.from("companies").select("email, name").eq("id", d.company_id).eq("tenant_id", tenantId).maybeSingle() : { data: null },
-    db.from("agent_settings").select("from_email, signature").eq("tenant_id", tenantId).maybeSingle(),
+    // goes out from the address of the colleague it was written for
+    senderProfile(db, tenantId, d.sender_user_id),
     db.from("tenants").select("name").eq("id", tenantId).single(),
   ]);
   const to = String(company?.email ?? "").trim().toLowerCase();

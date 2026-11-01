@@ -128,6 +128,15 @@ describe("agent missions", () => {
     expect((await db.query("select 1 from audit_log where tenant_id=$1", [t])).rows).toHaveLength(0);
   });
 
+  it("member profiles: everyone edits only their own, colleagues can read, other tenants see nothing", async () => {
+    await asUser(db, SALES, (q) => q("insert into member_profiles(tenant_id, user_id, sender_name, signature) values ($1,$2,'Ali','م. علي')", [tenant, SALES]), { commit: true });
+    await expect(asUser(db, SALES, (q) => q("insert into member_profiles(tenant_id, user_id, sender_name) values ($1,$2,'fake')", [tenant, OWNER]))).rejects.toThrow(/row-level security/);
+    const upd = await asUser(db, OWNER, (q) => q("update member_profiles set sender_name='hijack' where user_id=$1 returning 1", [SALES]));
+    expect(upd).toHaveLength(0);
+    expect(await asUser(db, OWNER, (q) => q("select sender_name from member_profiles"))).toEqual([{ sender_name: "Ali" }]);
+    expect(await asUser(db, OTHER, (q) => q("select * from member_profiles"))).toHaveLength(0);
+  });
+
   it("the cron schedule is registered", async () => {
     const j = await db.query<{ schedule: string }>("select schedule from cron.jobs where name='agent-worker-tick'");
     expect(j.rows[0]!.schedule).toBe("* * * * *");

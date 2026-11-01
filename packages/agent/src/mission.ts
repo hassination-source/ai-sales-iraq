@@ -18,6 +18,7 @@ import {
 } from "@ais/core";
 import { backoffMs, fetchPage, runOverpass, runPlacesSearch, type Fetch } from "./http";
 import { writeDraft, type AiConfig } from "./ai";
+import { senderProfile } from "./sender";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 /** Minimal surface of the Supabase client used here (service role; RLS bypassed — scope by tenant explicitly). */
@@ -485,9 +486,11 @@ async function draft(m: Mission, cfg: EffectiveConfig, p: Progress, deps: Deps, 
     return "done";
   }
 
-  const [{ data: settings }, { data: tenant }] = await Promise.all([
-    db.from("agent_settings").select("daily_draft_limit, draft_language, sender_name, signature").eq("tenant_id", m.tenant_id).maybeSingle(),
+  const [{ data: settings }, { data: tenant }, sender] = await Promise.all([
+    db.from("agent_settings").select("daily_draft_limit, draft_language").eq("tenant_id", m.tenant_id).maybeSingle(),
     db.from("tenants").select("name").eq("id", m.tenant_id).single(),
+    // the colleague who started the mission signs the messages it writes
+    senderProfile(db, m.tenant_id, m.created_by),
   ]);
   const limit = settings?.daily_draft_limit ?? 20;
   const language = (settings?.draft_language ?? "ar-IQ") as "ar-IQ" | "ar" | "en";
@@ -532,8 +535,8 @@ async function draft(m: Mission, cfg: EffectiveConfig, p: Progress, deps: Deps, 
       {
         pack: cfg,
         tenantName: tenant?.name ?? "",
-        senderName: settings?.sender_name ?? null,
-        signature: settings?.signature ?? null,
+        senderName: sender.sender_name,
+        signature: sender.signature,
         language,
         channel: "email",
         knowledge: docs,
@@ -579,7 +582,8 @@ async function draft(m: Mission, cfg: EffectiveConfig, p: Progress, deps: Deps, 
         channel: "email",
         language,
         subject: result.draft.subject,
-        body: withSignature(result.draft.body ?? "", settings?.signature),
+        body: withSignature(result.draft.body ?? "", sender.signature),
+        sender_user_id: m.created_by ?? null,
         grounding: { sources: result.draft.sources_used, hypotheses: result.draft.hypotheses, model: deps.ai.model, website: r?.status === "ok" ? r.url : null, directory: next.source_url },
         generated_by: deps.ai.model,
       })
